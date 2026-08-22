@@ -1,0 +1,1113 @@
+[
+  {
+    "orderId": "order_mock_400",
+    "razorpayOrderId": "order_mock_400",
+    "razorpayPaymentId": "pay_test_987",
+    "basket": [
+      {
+        "id": "novakey-k75",
+        "name": "NovaKey K75",
+        "category": "Mechanical Keyboard",
+        "price": 4499,
+        "stock": 10,
+        "description": "A keyboard",
+        "features": [
+          "Wireless"
+        ],
+        "tags": [
+          "wireless"
+        ],
+        "image": "/img.png",
+        "batteryLife": "80 hours",
+        "compatibleWith": []
+      }
+    ],
+    "amount": 4499,
+    "currency": "INR",
+    "transactionState": "PAYMENT_COMPLETED",
+    "timestamp": "2026-08-22T06:08:00.215Z",
+    "auditHistory": [
+      {
+        "id": "evt_1787378532002_caffa47",
+        "timestamp": "2026-08-22T06:02:12.002Z",
+        "eventType": "INTENT_RECEIVED",
+        "actor": "USER",
+        "status": "SUCCESS",
+        "summary": "User shopping requirements received.",
+        "details": {
+          "originalMessage": "I need a wireless mechanical keyboard for programming under ₹5,000.",
+          "sessionId": "sess_1787378532002_onoelyu",
+          "extractedIntent": {
+            "productCategory": "Mechanical Keyboard",
+            "budget": 5000,
+            "wireless": true,
+            "useCase": "programming"
+          }
+        }
+      },
+      {
+        "id": "evt_1787378532596_w2guc99",
+        "timestamp": "2026-08-22T06:02:12.596Z",
+        "eventType": "CATALOG_SEARCHED",
+        "actor": "AXIS_ONE",
+        "status": "SUCCESS",
+        "summary": "Merchant catalog searched for matching products.",
+        "details": {
+          "candidateCount": 4
+        }
+      },
+      {
+        "id": "evt_1787378532596_hwygb7l",
+        "timestamp": "2026-08-22T06:02:12.596Z",
+        "eventType": "PRODUCTS_RANKED",
+        "actor": "AXIS_ONE",
+        "status": "SUCCESS",
+        "summary": "Product candidates ranked deterministically.",
+        "details": {
+          "topRecommendation": "NovaKey K75",
+          "rankedResultsCount": 4
+        }
+      },
+      {
+        "id": "evt_1787378532596_468wbq9",
+        "timestamp": "2026-08-22T06:02:12.596Z",
+        "eventType": "PRODUCT_SELECTED",
+        "actor": "AXIS_ONE",
+        "status": "SUCCESS",
+        "summary": "Selected top recommendation: NovaKey K75.",
+        "details": {
+          "productId": "novakey-k75",
+          "productName": "NovaKey K75",
+          "price": 4499
+        }
+      },
+      {
+        "id": "evt_1787378532596_r5tx928",
+        "timestamp": "2026-08-22T06:02:12.597Z",
+        "eventType": "UPSELL_IDENTIFIED",
+        "actor": "AXIS_ONE",
+        "status": "SUCCESS",
+        "summary": "Relevant cross-sell opportunity identified.",
+        "details": {
+          "recommendedProduct": "ErgoRest Wrist Support",
+          "upsellAmount": 399,
+          "newBasketTotal": 4898
+        }
+      },
+      {
+        "id": "evt_1787378532597_4bepbed",
+        "timestamp": "2026-08-22T06:02:12.597Z",
+        "eventType": "POLICY_VALIDATED",
+        "actor": "POLICY_ENGINE",
+        "status": "SUCCESS",
+        "summary": "Basket passed deterministic merchant policy validation.",
+        "details": {
+          "originalTotal": 4898,
+          "finalAmount": 4898,
+          "approved": true,
+          "failures": []
+        }
+      },
+      {
+        "id": "evt_1787378532956_rl6dz6n",
+        "timestamp": "2026-08-22T06:02:12.956Z",
+        "eventType": "EXPLANATION_GENERATED",
+        "actor": "AXIS_ONE",
+        "status": "FAILED",
+        "summary": "Recommendation explanation generated via FALLBACK.",
+        "details": {
+          "explanation": {
+            "recommendationExplanation": "NovaKey K75 matches your request because it is wireless, good battery life, is suited to programming and stays within your ₹5000 budget and costs ₹4499.",
+            "upsellExplanation": "ErgoRest Wrist Support is compatible with NovaKey K75 and supports comfortable long programming sessions. At ₹399, it fits within your remaining ₹501 budget.",
+            "budgetExplanation": "The combined basket costs ₹4898, leaving ₹102 within your stated ₹5000 budget.",
+            "policyExplanation": "The proposed basket passed inventory, budget, transaction amount, and other deterministic merchant policy checks.",
+            "summary": "AXIS ONE recommends NovaKey K75. NovaKey K75 matches your request because it is wireless, good battery life, is suited to programming and stays within your ₹5000 budget and costs ₹4499. ErgoRest Wrist Support is recommended as a complementary product. The total basket fits within the transaction policies.",
+            "source": "FALLBACK"
+          }
+        }
+      },
+      {
+        "id": "evt_1787378573733_44towbb",
+        "timestamp": "2026-08-22T06:02:53.733Z",
+        "eventType": "INTENT_RECEIVED",
+        "actor": "USER",
+        "status": "SUCCESS",
+        "summary": "User follow-up received. Action: CONFIRM_SELECTION. Msg: \"Okay, I'll take it\"",
+        "details": {
+          "originalMessage": "Okay, I'll take it",
+          "classificationAction": "CONFIRM_SELECTION",
+          "sessionId": "sess_1787378532002_onoelyu"
+        }
+      },
+      {
+        "id": "evt_1787378573733_8sw06q3",
+        "timestamp": "2026-08-22T06:02:53.733Z",
+        "eventType": "USER_APPROVED",
+        "actor": "USER",
+        "status": "SUCCESS",
+        "summary": "User approved the proposed basket.",
+        "details": {
+          "selectedProducts": [
+            "NovaKey K75",
+            "ErgoRest Wrist Support"
+          ],
+          "finalAmount": 4898,
+          "message": "Payment has not started yet."
+        }
+      },
+      {
+        "id": "evt_1787378573979_jbhx5u7",
+        "timestamp": "2026-08-22T06:02:53.979Z",
+        "eventType": "EXPLANATION_GENERATED",
+        "actor": "AXIS_ONE",
+        "status": "FAILED",
+        "summary": "Recommendation explanation generated via FALLBACK.",
+        "details": {
+          "explanation": {
+            "recommendationExplanation": "NovaKey K75 matches your request because it good battery life, is suited to programming and stays within your ₹5000 budget and costs ₹4499.",
+            "upsellExplanation": "Suggested as compatible accessory.",
+            "budgetExplanation": "The combined basket costs ₹4898, leaving ₹102 within your stated ₹5000 budget.",
+            "policyExplanation": "The proposed basket passed inventory, budget, transaction amount, and other deterministic merchant policy checks.",
+            "summary": "AXIS ONE recommends NovaKey K75. NovaKey K75 matches your request because it good battery life, is suited to programming and stays within your ₹5000 budget and costs ₹4499. ErgoRest Wrist Support is recommended as a complementary product. The total basket fits within the transaction policies.",
+            "source": "FALLBACK"
+          }
+        }
+      },
+      {
+        "id": "evt_1787378880183_ppilxia",
+        "timestamp": "2026-08-22T06:08:00.183Z",
+        "eventType": "PAYMENT_INITIATED",
+        "actor": "AXIS_ONE",
+        "status": "PENDING",
+        "summary": "Razorpay payment order created for the confirmed basket.",
+        "details": {
+          "sessionId": "sess_test_1234567",
+          "razorpayOrderId": "order_mock_400",
+          "amount": 449900,
+          "currency": "INR"
+        }
+      }
+    ]
+  },
+  {
+    "orderId": "order_webhook_001",
+    "razorpayOrderId": "order_webhook_001",
+    "razorpayPaymentId": "pay_webhook_abc",
+    "basket": [
+      {
+        "id": "novakey-k75",
+        "name": "NovaKey K75",
+        "category": "Mechanical Keyboard",
+        "price": 4499,
+        "stock": 10,
+        "description": "A keyboard",
+        "features": [
+          "Wireless"
+        ],
+        "tags": [
+          "wireless"
+        ],
+        "image": "/img.png",
+        "batteryLife": "80 hours",
+        "compatibleWith": []
+      }
+    ],
+    "amount": 4499,
+    "currency": "INR",
+    "transactionState": "PAYMENT_COMPLETED",
+    "timestamp": "2026-08-22T06:08:00.348Z",
+    "auditHistory": [
+      {
+        "id": "evt_1787378532002_caffa47",
+        "timestamp": "2026-08-22T06:02:12.002Z",
+        "eventType": "INTENT_RECEIVED",
+        "actor": "USER",
+        "status": "SUCCESS",
+        "summary": "User shopping requirements received.",
+        "details": {
+          "originalMessage": "I need a wireless mechanical keyboard for programming under ₹5,000.",
+          "sessionId": "sess_1787378532002_onoelyu",
+          "extractedIntent": {
+            "productCategory": "Mechanical Keyboard",
+            "budget": 5000,
+            "wireless": true,
+            "useCase": "programming"
+          }
+        }
+      },
+      {
+        "id": "evt_1787378532596_w2guc99",
+        "timestamp": "2026-08-22T06:02:12.596Z",
+        "eventType": "CATALOG_SEARCHED",
+        "actor": "AXIS_ONE",
+        "status": "SUCCESS",
+        "summary": "Merchant catalog searched for matching products.",
+        "details": {
+          "candidateCount": 4
+        }
+      },
+      {
+        "id": "evt_1787378532596_hwygb7l",
+        "timestamp": "2026-08-22T06:02:12.596Z",
+        "eventType": "PRODUCTS_RANKED",
+        "actor": "AXIS_ONE",
+        "status": "SUCCESS",
+        "summary": "Product candidates ranked deterministically.",
+        "details": {
+          "topRecommendation": "NovaKey K75",
+          "rankedResultsCount": 4
+        }
+      },
+      {
+        "id": "evt_1787378532596_468wbq9",
+        "timestamp": "2026-08-22T06:02:12.596Z",
+        "eventType": "PRODUCT_SELECTED",
+        "actor": "AXIS_ONE",
+        "status": "SUCCESS",
+        "summary": "Selected top recommendation: NovaKey K75.",
+        "details": {
+          "productId": "novakey-k75",
+          "productName": "NovaKey K75",
+          "price": 4499
+        }
+      },
+      {
+        "id": "evt_1787378532596_r5tx928",
+        "timestamp": "2026-08-22T06:02:12.597Z",
+        "eventType": "UPSELL_IDENTIFIED",
+        "actor": "AXIS_ONE",
+        "status": "SUCCESS",
+        "summary": "Relevant cross-sell opportunity identified.",
+        "details": {
+          "recommendedProduct": "ErgoRest Wrist Support",
+          "upsellAmount": 399,
+          "newBasketTotal": 4898
+        }
+      },
+      {
+        "id": "evt_1787378532597_4bepbed",
+        "timestamp": "2026-08-22T06:02:12.597Z",
+        "eventType": "POLICY_VALIDATED",
+        "actor": "POLICY_ENGINE",
+        "status": "SUCCESS",
+        "summary": "Basket passed deterministic merchant policy validation.",
+        "details": {
+          "originalTotal": 4898,
+          "finalAmount": 4898,
+          "approved": true,
+          "failures": []
+        }
+      },
+      {
+        "id": "evt_1787378532956_rl6dz6n",
+        "timestamp": "2026-08-22T06:02:12.956Z",
+        "eventType": "EXPLANATION_GENERATED",
+        "actor": "AXIS_ONE",
+        "status": "FAILED",
+        "summary": "Recommendation explanation generated via FALLBACK.",
+        "details": {
+          "explanation": {
+            "recommendationExplanation": "NovaKey K75 matches your request because it is wireless, good battery life, is suited to programming and stays within your ₹5000 budget and costs ₹4499.",
+            "upsellExplanation": "ErgoRest Wrist Support is compatible with NovaKey K75 and supports comfortable long programming sessions. At ₹399, it fits within your remaining ₹501 budget.",
+            "budgetExplanation": "The combined basket costs ₹4898, leaving ₹102 within your stated ₹5000 budget.",
+            "policyExplanation": "The proposed basket passed inventory, budget, transaction amount, and other deterministic merchant policy checks.",
+            "summary": "AXIS ONE recommends NovaKey K75. NovaKey K75 matches your request because it is wireless, good battery life, is suited to programming and stays within your ₹5000 budget and costs ₹4499. ErgoRest Wrist Support is recommended as a complementary product. The total basket fits within the transaction policies.",
+            "source": "FALLBACK"
+          }
+        }
+      },
+      {
+        "id": "evt_1787378573733_44towbb",
+        "timestamp": "2026-08-22T06:02:53.733Z",
+        "eventType": "INTENT_RECEIVED",
+        "actor": "USER",
+        "status": "SUCCESS",
+        "summary": "User follow-up received. Action: CONFIRM_SELECTION. Msg: \"Okay, I'll take it\"",
+        "details": {
+          "originalMessage": "Okay, I'll take it",
+          "classificationAction": "CONFIRM_SELECTION",
+          "sessionId": "sess_1787378532002_onoelyu"
+        }
+      },
+      {
+        "id": "evt_1787378573733_8sw06q3",
+        "timestamp": "2026-08-22T06:02:53.733Z",
+        "eventType": "USER_APPROVED",
+        "actor": "USER",
+        "status": "SUCCESS",
+        "summary": "User approved the proposed basket.",
+        "details": {
+          "selectedProducts": [
+            "NovaKey K75",
+            "ErgoRest Wrist Support"
+          ],
+          "finalAmount": 4898,
+          "message": "Payment has not started yet."
+        }
+      },
+      {
+        "id": "evt_1787378573979_jbhx5u7",
+        "timestamp": "2026-08-22T06:02:53.979Z",
+        "eventType": "EXPLANATION_GENERATED",
+        "actor": "AXIS_ONE",
+        "status": "FAILED",
+        "summary": "Recommendation explanation generated via FALLBACK.",
+        "details": {
+          "explanation": {
+            "recommendationExplanation": "NovaKey K75 matches your request because it good battery life, is suited to programming and stays within your ₹5000 budget and costs ₹4499.",
+            "upsellExplanation": "Suggested as compatible accessory.",
+            "budgetExplanation": "The combined basket costs ₹4898, leaving ₹102 within your stated ₹5000 budget.",
+            "policyExplanation": "The proposed basket passed inventory, budget, transaction amount, and other deterministic merchant policy checks.",
+            "summary": "AXIS ONE recommends NovaKey K75. NovaKey K75 matches your request because it good battery life, is suited to programming and stays within your ₹5000 budget and costs ₹4499. ErgoRest Wrist Support is recommended as a complementary product. The total basket fits within the transaction policies.",
+            "source": "FALLBACK"
+          }
+        }
+      },
+      {
+        "id": "evt_1787378880183_ppilxia",
+        "timestamp": "2026-08-22T06:08:00.183Z",
+        "eventType": "PAYMENT_INITIATED",
+        "actor": "AXIS_ONE",
+        "status": "PENDING",
+        "summary": "Razorpay payment order created for the confirmed basket.",
+        "details": {
+          "sessionId": "sess_test_1234567",
+          "razorpayOrderId": "order_mock_400",
+          "amount": 449900,
+          "currency": "INR"
+        }
+      },
+      {
+        "id": "evt_1787378880216_n3flzn0",
+        "timestamp": "2026-08-22T06:08:00.216Z",
+        "eventType": "PAYMENT_COMPLETED",
+        "actor": "RAZORPAY",
+        "status": "SUCCESS",
+        "summary": "Payment successfully verified.",
+        "details": {
+          "sessionId": "sess_test_1234567",
+          "razorpayPaymentId": "pay_test_987",
+          "razorpayOrderId": "order_mock_400",
+          "amount": 4499,
+          "currency": "INR"
+        }
+      },
+      {
+        "id": "evt_1787378880347_zoh2txl",
+        "timestamp": "2026-08-22T06:08:00.348Z",
+        "eventType": "PAYMENT_COMPLETED",
+        "actor": "RAZORPAY_WEBHOOK",
+        "status": "SUCCESS",
+        "summary": "Payment captured via webhook (Event: payment.captured). Payment ID: pay_webhook_abc",
+        "details": {
+          "sessionId": "sess_webhook_789",
+          "razorpayOrderId": "order_webhook_001",
+          "razorpayPaymentId": "pay_webhook_abc"
+        }
+      }
+    ]
+  },
+  {
+    "orderId": "order_TSiCbJPxrueosu",
+    "razorpayOrderId": "order_TSiCbJPxrueosu",
+    "razorpayPaymentId": "pay_TSiCsLfwKq7qSB",
+    "basket": [
+      {
+        "id": "novakey-k75",
+        "name": "NovaKey K75",
+        "category": "Mechanical Keyboard",
+        "price": 4499,
+        "stock": 18,
+        "description": "A wireless mechanical keyboard designed for long programming and productivity sessions.",
+        "features": [
+          "Wireless connectivity",
+          "80-hour battery life",
+          "Mechanical switches",
+          "Programmable keys",
+          "Compact 75% layout"
+        ],
+        "tags": [
+          "wireless",
+          "programming",
+          "productivity",
+          "mechanical",
+          "keyboard",
+          "battery"
+        ],
+        "image": "/placeholder-novakey-k75.png",
+        "batteryLife": "80 hours",
+        "compatibleWith": []
+      },
+      {
+        "id": "ergorest-wrist-support",
+        "name": "ErgoRest Wrist Support",
+        "category": "Wrist Rest",
+        "price": 399,
+        "stock": 30,
+        "description": "An ergonomic wrist support designed for comfortable long typing sessions.",
+        "features": [
+          "Ergonomic support",
+          "Memory foam",
+          "Non-slip base",
+          "Compatible with compact and full-size keyboards"
+        ],
+        "tags": [
+          "ergonomic",
+          "programming",
+          "keyboard-accessory",
+          "comfort",
+          "productivity"
+        ],
+        "image": "/placeholder-ergorest-wrist-support.png",
+        "batteryLife": null,
+        "compatibleWith": [
+          "NovaKey K75"
+        ]
+      }
+    ],
+    "amount": 4898,
+    "currency": "INR",
+    "transactionState": "PAYMENT_COMPLETED",
+    "timestamp": "2026-08-22T06:12:10.810Z",
+    "auditHistory": [
+      {
+        "id": "evt_1787379028899_7275gjg",
+        "timestamp": "2026-08-22T06:10:28.900Z",
+        "eventType": "INTENT_RECEIVED",
+        "actor": "USER",
+        "status": "SUCCESS",
+        "summary": "User shopping requirements received.",
+        "details": {
+          "originalMessage": "hi",
+          "sessionId": "sess_1787379028899_gaiyvqi",
+          "extractedIntent": {
+            "productCategory": "Mechanical Keyboard"
+          }
+        }
+      },
+      {
+        "id": "evt_1787379029639_8xisod4",
+        "timestamp": "2026-08-22T06:10:29.639Z",
+        "eventType": "CATALOG_SEARCHED",
+        "actor": "AXIS_ONE",
+        "status": "SUCCESS",
+        "summary": "Merchant catalog searched for matching products.",
+        "details": {
+          "candidateCount": 4
+        }
+      },
+      {
+        "id": "evt_1787379029640_3uij373",
+        "timestamp": "2026-08-22T06:10:29.640Z",
+        "eventType": "PRODUCTS_RANKED",
+        "actor": "AXIS_ONE",
+        "status": "SUCCESS",
+        "summary": "Product candidates ranked deterministically.",
+        "details": {
+          "topRecommendation": "NovaKey K75",
+          "rankedResultsCount": 4
+        }
+      },
+      {
+        "id": "evt_1787379029640_qn3bup6",
+        "timestamp": "2026-08-22T06:10:29.640Z",
+        "eventType": "PRODUCT_SELECTED",
+        "actor": "AXIS_ONE",
+        "status": "SUCCESS",
+        "summary": "Selected top recommendation: NovaKey K75.",
+        "details": {
+          "productId": "novakey-k75",
+          "productName": "NovaKey K75",
+          "price": 4499
+        }
+      },
+      {
+        "id": "evt_1787379029642_hzmbtc8",
+        "timestamp": "2026-08-22T06:10:29.642Z",
+        "eventType": "UPSELL_IDENTIFIED",
+        "actor": "AXIS_ONE",
+        "status": "SUCCESS",
+        "summary": "Relevant cross-sell opportunity identified.",
+        "details": {
+          "recommendedProduct": "ErgoRest Wrist Support",
+          "upsellAmount": 399,
+          "newBasketTotal": 4898
+        }
+      },
+      {
+        "id": "evt_1787379029643_ilhth3k",
+        "timestamp": "2026-08-22T06:10:29.643Z",
+        "eventType": "POLICY_VALIDATED",
+        "actor": "POLICY_ENGINE",
+        "status": "SUCCESS",
+        "summary": "Basket passed deterministic merchant policy validation.",
+        "details": {
+          "originalTotal": 4898,
+          "finalAmount": 4898,
+          "approved": true,
+          "failures": []
+        }
+      },
+      {
+        "id": "evt_1787379029945_fxaxblz",
+        "timestamp": "2026-08-22T06:10:29.945Z",
+        "eventType": "EXPLANATION_GENERATED",
+        "actor": "AXIS_ONE",
+        "status": "FAILED",
+        "summary": "Recommendation explanation generated via FALLBACK.",
+        "details": {
+          "explanation": {
+            "recommendationExplanation": "NovaKey K75 at ₹4499 fits your criteria (matching your requirements).",
+            "upsellExplanation": "ErgoRest Wrist Support is compatible with NovaKey K75 and supports comfortable long programming sessions. At ₹399, it fits within your remaining ₹995500 budget.",
+            "budgetExplanation": "The total basket comes to ₹4898, leaving ₹995101 within your ₹999999 budget.",
+            "policyExplanation": "All items passed inventory, pricing, and merchant policy checks.",
+            "summary": "Hey! Your current selection of the NovaKey K75 (₹4499) is active. Would you like to compare it, adjust your budget, or proceed to checkout?",
+            "source": "FALLBACK"
+          }
+        }
+      },
+      {
+        "id": "evt_1787379046511_nhtzn4g",
+        "timestamp": "2026-08-22T06:10:46.511Z",
+        "eventType": "INTENT_RECEIVED",
+        "actor": "USER",
+        "status": "SUCCESS",
+        "summary": "User follow-up received. Action: REQUEST_EXPLANATION. Msg: \"compare\"",
+        "details": {
+          "originalMessage": "compare",
+          "classificationAction": "REQUEST_EXPLANATION",
+          "sessionId": "sess_1787379028899_gaiyvqi"
+        }
+      },
+      {
+        "id": "evt_1787379046748_38whtwt",
+        "timestamp": "2026-08-22T06:10:46.748Z",
+        "eventType": "EXPLANATION_GENERATED",
+        "actor": "AXIS_ONE",
+        "status": "FAILED",
+        "summary": "Recommendation explanation generated via FALLBACK.",
+        "details": {
+          "explanation": {
+            "recommendationExplanation": "NovaKey K75 at ₹4499 fits your criteria (matching your requirements).",
+            "upsellExplanation": "Suggested as compatible accessory in initial session.",
+            "budgetExplanation": "The total basket comes to ₹4898, leaving ₹0 within your ₹4898 budget.",
+            "policyExplanation": "All items passed inventory, pricing, and merchant policy checks.",
+            "summary": "Compared to the previous option (higher price), the NovaKey K75 (₹4499) adjusts your cost to ₹4898. Both fit within merchant policy rules.",
+            "source": "FALLBACK"
+          }
+        }
+      },
+      {
+        "id": "evt_1787379058790_dr59xm2",
+        "timestamp": "2026-08-22T06:10:58.790Z",
+        "eventType": "INTENT_RECEIVED",
+        "actor": "USER",
+        "status": "SUCCESS",
+        "summary": "User follow-up received. Action: GENERAL_FOLLOW_UP. Msg: \"i want within 3000\"",
+        "details": {
+          "originalMessage": "i want within 3000",
+          "classificationAction": "GENERAL_FOLLOW_UP",
+          "sessionId": "sess_1787379028899_gaiyvqi"
+        }
+      },
+      {
+        "id": "evt_1787379058998_vlxp2jk",
+        "timestamp": "2026-08-22T06:10:58.998Z",
+        "eventType": "EXPLANATION_GENERATED",
+        "actor": "AXIS_ONE",
+        "status": "FAILED",
+        "summary": "Recommendation explanation generated via FALLBACK.",
+        "details": {
+          "explanation": {
+            "recommendationExplanation": "NovaKey K75 at ₹4499 fits your criteria (matching your requirements).",
+            "upsellExplanation": "Retained from session.",
+            "budgetExplanation": "The total basket comes to ₹4898, leaving ₹0 within your ₹4898 budget.",
+            "policyExplanation": "All items passed inventory, pricing, and merchant policy checks.",
+            "summary": "I've updated your selection with the NovaKey K75 (₹4499). The basket total is ₹4898, which complies with all merchant policies.",
+            "source": "FALLBACK"
+          }
+        }
+      },
+      {
+        "id": "evt_1787379074787_3eoe1gy",
+        "timestamp": "2026-08-22T06:11:14.787Z",
+        "eventType": "INTENT_RECEIVED",
+        "actor": "USER",
+        "status": "SUCCESS",
+        "summary": "User follow-up received. Action: GENERAL_FOLLOW_UP. Msg: \"any discount\"",
+        "details": {
+          "originalMessage": "any discount",
+          "classificationAction": "GENERAL_FOLLOW_UP",
+          "sessionId": "sess_1787379028899_gaiyvqi"
+        }
+      },
+      {
+        "id": "evt_1787379075016_0a0v1op",
+        "timestamp": "2026-08-22T06:11:15.016Z",
+        "eventType": "EXPLANATION_GENERATED",
+        "actor": "AXIS_ONE",
+        "status": "FAILED",
+        "summary": "Recommendation explanation generated via FALLBACK.",
+        "details": {
+          "explanation": {
+            "recommendationExplanation": "NovaKey K75 at ₹4499 fits your criteria (matching your requirements).",
+            "upsellExplanation": "Retained from session.",
+            "budgetExplanation": "The total basket comes to ₹4898, leaving ₹0 within your ₹4898 budget.",
+            "policyExplanation": "All items passed inventory, pricing, and merchant policy checks.",
+            "summary": "I've updated your selection with the NovaKey K75 (₹4499). The basket total is ₹4898, which complies with all merchant policies.",
+            "source": "FALLBACK"
+          }
+        }
+      },
+      {
+        "id": "evt_1787379080819_eptwcuk",
+        "timestamp": "2026-08-22T06:11:20.819Z",
+        "eventType": "INTENT_RECEIVED",
+        "actor": "USER",
+        "status": "SUCCESS",
+        "summary": "User follow-up received. Action: GENERAL_FOLLOW_UP. Msg: \"okayyy\"",
+        "details": {
+          "originalMessage": "okayyy",
+          "classificationAction": "GENERAL_FOLLOW_UP",
+          "sessionId": "sess_1787379028899_gaiyvqi"
+        }
+      },
+      {
+        "id": "evt_1787379081020_s8wlysd",
+        "timestamp": "2026-08-22T06:11:21.020Z",
+        "eventType": "EXPLANATION_GENERATED",
+        "actor": "AXIS_ONE",
+        "status": "FAILED",
+        "summary": "Recommendation explanation generated via FALLBACK.",
+        "details": {
+          "explanation": {
+            "recommendationExplanation": "NovaKey K75 at ₹4499 fits your criteria (matching your requirements).",
+            "upsellExplanation": "Retained from session.",
+            "budgetExplanation": "The total basket comes to ₹4898, leaving ₹0 within your ₹4898 budget.",
+            "policyExplanation": "All items passed inventory, pricing, and merchant policy checks.",
+            "summary": "I've updated your selection with the NovaKey K75 (₹4499). The basket total is ₹4898, which complies with all merchant policies.",
+            "source": "FALLBACK"
+          }
+        }
+      },
+      {
+        "id": "evt_1787379085835_r9a88wc",
+        "timestamp": "2026-08-22T06:11:25.836Z",
+        "eventType": "INTENT_RECEIVED",
+        "actor": "USER",
+        "status": "SUCCESS",
+        "summary": "User follow-up received. Action: GENERAL_FOLLOW_UP. Msg: \"payment\"",
+        "details": {
+          "originalMessage": "payment",
+          "classificationAction": "GENERAL_FOLLOW_UP",
+          "sessionId": "sess_1787379028899_gaiyvqi"
+        }
+      },
+      {
+        "id": "evt_1787379086074_9mmq534",
+        "timestamp": "2026-08-22T06:11:26.074Z",
+        "eventType": "EXPLANATION_GENERATED",
+        "actor": "AXIS_ONE",
+        "status": "FAILED",
+        "summary": "Recommendation explanation generated via FALLBACK.",
+        "details": {
+          "explanation": {
+            "recommendationExplanation": "NovaKey K75 at ₹4499 fits your criteria (matching your requirements).",
+            "upsellExplanation": "Retained from session.",
+            "budgetExplanation": "The total basket comes to ₹4898, leaving ₹0 within your ₹4898 budget.",
+            "policyExplanation": "All items passed inventory, pricing, and merchant policy checks.",
+            "summary": "When you're ready to buy, simply say 'Okay, I'll take it' to confirm your basket and unlock checkout.",
+            "source": "FALLBACK"
+          }
+        }
+      },
+      {
+        "id": "evt_1787379096280_rib6f43",
+        "timestamp": "2026-08-22T06:11:36.280Z",
+        "eventType": "INTENT_RECEIVED",
+        "actor": "USER",
+        "status": "SUCCESS",
+        "summary": "User follow-up received. Action: CONFIRM_SELECTION. Msg: \"Okay, I'll take it\"",
+        "details": {
+          "originalMessage": "Okay, I'll take it",
+          "classificationAction": "CONFIRM_SELECTION",
+          "sessionId": "sess_1787379028899_gaiyvqi"
+        }
+      },
+      {
+        "id": "evt_1787379096281_x5c80tp",
+        "timestamp": "2026-08-22T06:11:36.281Z",
+        "eventType": "USER_APPROVED",
+        "actor": "USER",
+        "status": "SUCCESS",
+        "summary": "User approved the proposed basket.",
+        "details": {
+          "selectedProducts": [
+            "NovaKey K75",
+            "ErgoRest Wrist Support"
+          ],
+          "finalAmount": 4898,
+          "message": "Payment has not started yet."
+        }
+      },
+      {
+        "id": "evt_1787379096508_s0f70xo",
+        "timestamp": "2026-08-22T06:11:36.508Z",
+        "eventType": "EXPLANATION_GENERATED",
+        "actor": "AXIS_ONE",
+        "status": "FAILED",
+        "summary": "Recommendation explanation generated via FALLBACK.",
+        "details": {
+          "explanation": {
+            "recommendationExplanation": "NovaKey K75 at ₹4499 fits your criteria (matching your requirements).",
+            "upsellExplanation": "Suggested as compatible accessory.",
+            "budgetExplanation": "The total basket comes to ₹4898, leaving ₹0 within your ₹4898 budget.",
+            "policyExplanation": "All items passed inventory, pricing, and merchant policy checks.",
+            "summary": "Great choice! Your basket with NovaKey K75 (₹4898) is locked in and ready for secure checkout.",
+            "source": "FALLBACK"
+          }
+        }
+      },
+      {
+        "id": "evt_1787379098991_uzgryae",
+        "timestamp": "2026-08-22T06:11:38.991Z",
+        "eventType": "PAYMENT_INITIATED",
+        "actor": "AXIS_ONE",
+        "status": "PENDING",
+        "summary": "Razorpay payment order created for the confirmed basket.",
+        "details": {
+          "sessionId": "sess_1787379028899_gaiyvqi",
+          "razorpayOrderId": "order_TSiCbJPxrueosu",
+          "amount": 489800,
+          "currency": "INR"
+        }
+      },
+      {
+        "id": "evt_1787379099141_ytba6s7",
+        "timestamp": "2026-08-22T06:11:39.141Z",
+        "eventType": "PAYMENT_INITIATED",
+        "actor": "USER",
+        "status": "SUCCESS",
+        "summary": "Payment is being processed.",
+        "details": {
+          "sessionId": "sess_1787379028899_gaiyvqi",
+          "newState": "PAYMENT_PROCESSING"
+        }
+      }
+    ]
+  },
+  {
+    "orderId": "order_TSiJbjzFt8X0Ze",
+    "razorpayOrderId": "order_TSiJbjzFt8X0Ze",
+    "razorpayPaymentId": "pay_TSiJjRAoMQI7of",
+    "basket": [
+      {
+        "id": "novakey-k75",
+        "name": "NovaKey K75",
+        "category": "Mechanical Keyboard",
+        "price": 4499,
+        "stock": 18,
+        "description": "A wireless mechanical keyboard designed for long programming and productivity sessions.",
+        "features": [
+          "Wireless connectivity",
+          "80-hour battery life",
+          "Mechanical switches",
+          "Programmable keys",
+          "Compact 75% layout"
+        ],
+        "tags": [
+          "wireless",
+          "programming",
+          "productivity",
+          "mechanical",
+          "keyboard",
+          "battery"
+        ],
+        "image": "/placeholder-novakey-k75.png",
+        "batteryLife": "80 hours",
+        "compatibleWith": []
+      }
+    ],
+    "amount": 4499,
+    "currency": "INR",
+    "transactionState": "PAYMENT_COMPLETED",
+    "timestamp": "2026-08-22T06:18:55.184Z",
+    "auditHistory": [
+      {
+        "id": "evt_1787379426906_or9jzi6",
+        "timestamp": "2026-08-22T06:17:06.906Z",
+        "eventType": "INTENT_RECEIVED",
+        "actor": "USER",
+        "status": "SUCCESS",
+        "summary": "User shopping requirements received.",
+        "details": {
+          "originalMessage": "cheaper",
+          "sessionId": "sess_1787379426906_xo5pxhn",
+          "extractedIntent": {
+            "productCategory": "Mechanical Keyboard"
+          }
+        }
+      },
+      {
+        "id": "evt_1787379427744_tsfepi2",
+        "timestamp": "2026-08-22T06:17:07.744Z",
+        "eventType": "CATALOG_SEARCHED",
+        "actor": "AXIS_ONE",
+        "status": "SUCCESS",
+        "summary": "Merchant catalog searched for matching products.",
+        "details": {
+          "candidateCount": 4
+        }
+      },
+      {
+        "id": "evt_1787379427744_4ozf9e1",
+        "timestamp": "2026-08-22T06:17:07.744Z",
+        "eventType": "PRODUCTS_RANKED",
+        "actor": "AXIS_ONE",
+        "status": "SUCCESS",
+        "summary": "Product candidates ranked deterministically.",
+        "details": {
+          "topRecommendation": "NovaKey K75",
+          "rankedResultsCount": 4
+        }
+      },
+      {
+        "id": "evt_1787379427744_ssejzn6",
+        "timestamp": "2026-08-22T06:17:07.744Z",
+        "eventType": "PRODUCT_SELECTED",
+        "actor": "AXIS_ONE",
+        "status": "SUCCESS",
+        "summary": "Selected top recommendation: NovaKey K75.",
+        "details": {
+          "productId": "novakey-k75",
+          "productName": "NovaKey K75",
+          "price": 4499
+        }
+      },
+      {
+        "id": "evt_1787379427745_1z8zbpn",
+        "timestamp": "2026-08-22T06:17:07.745Z",
+        "eventType": "UPSELL_IDENTIFIED",
+        "actor": "AXIS_ONE",
+        "status": "SUCCESS",
+        "summary": "Relevant cross-sell opportunity identified.",
+        "details": {
+          "recommendedProduct": "ErgoRest Wrist Support",
+          "upsellAmount": 399,
+          "newBasketTotal": 4898
+        }
+      },
+      {
+        "id": "evt_1787379427745_sit8m3j",
+        "timestamp": "2026-08-22T06:17:07.745Z",
+        "eventType": "POLICY_VALIDATED",
+        "actor": "POLICY_ENGINE",
+        "status": "SUCCESS",
+        "summary": "Basket passed deterministic merchant policy validation.",
+        "details": {
+          "originalTotal": 4898,
+          "finalAmount": 4898,
+          "approved": true,
+          "failures": []
+        }
+      },
+      {
+        "id": "evt_1787379428050_rtm6yjt",
+        "timestamp": "2026-08-22T06:17:08.050Z",
+        "eventType": "EXPLANATION_GENERATED",
+        "actor": "AXIS_ONE",
+        "status": "FAILED",
+        "summary": "Recommendation explanation generated via FALLBACK.",
+        "details": {
+          "explanation": {
+            "recommendationExplanation": "NovaKey K75 at ₹4499 fits your criteria (matching your requirements).",
+            "upsellExplanation": "ErgoRest Wrist Support is compatible with NovaKey K75 and supports comfortable long programming sessions. At ₹399, it fits within your remaining ₹995500 budget.",
+            "budgetExplanation": "The total basket comes to ₹4898, leaving ₹995101 within your ₹999999 budget.",
+            "policyExplanation": "All items passed inventory, pricing, and merchant policy checks.",
+            "summary": "Based on your requirements, I recommend the NovaKey K75 (₹4499). It leaves ₹995101 in budget flexibility. I've also paired it with an optional ErgoRest Wrist Support (₹399) for better ergonomics.",
+            "source": "FALLBACK"
+          }
+        }
+      },
+      {
+        "id": "evt_1787379446482_4c0f9dz",
+        "timestamp": "2026-08-22T06:17:26.482Z",
+        "eventType": "INTENT_RECEIVED",
+        "actor": "USER",
+        "status": "SUCCESS",
+        "summary": "User follow-up received. Action: REQUEST_EXPLANATION. Msg: \"why?\"",
+        "details": {
+          "originalMessage": "why?",
+          "classificationAction": "REQUEST_EXPLANATION",
+          "sessionId": "sess_1787379426906_xo5pxhn"
+        }
+      },
+      {
+        "id": "evt_1787379446786_4urvv8u",
+        "timestamp": "2026-08-22T06:17:26.786Z",
+        "eventType": "EXPLANATION_GENERATED",
+        "actor": "AXIS_ONE",
+        "status": "FAILED",
+        "summary": "Recommendation explanation generated via FALLBACK.",
+        "details": {
+          "explanation": {
+            "recommendationExplanation": "NovaKey K75 at ₹4499 fits your criteria (matching your requirements).",
+            "upsellExplanation": "Suggested as compatible accessory in initial session.",
+            "budgetExplanation": "The total basket comes to ₹4898, leaving ₹0 within your ₹4898 budget.",
+            "policyExplanation": "All items passed inventory, pricing, and merchant policy checks.",
+            "summary": "I recommended the NovaKey K75 because it satisfies your strongest requirements (Category matches selection (\"Mechanical Keyboard\")) at ₹4499. It scored highest in our catalog evaluation with verified stock and merchant policy compliance.",
+            "source": "FALLBACK"
+          }
+        }
+      },
+      {
+        "id": "evt_1787379459276_n03kdpf",
+        "timestamp": "2026-08-22T06:17:39.276Z",
+        "eventType": "INTENT_RECEIVED",
+        "actor": "USER",
+        "status": "SUCCESS",
+        "summary": "User follow-up received. Action: REQUEST_EXPLANATION. Msg: \"compare\"",
+        "details": {
+          "originalMessage": "compare",
+          "classificationAction": "REQUEST_EXPLANATION",
+          "sessionId": "sess_1787379426906_xo5pxhn"
+        }
+      },
+      {
+        "id": "evt_1787379459605_ze7p1t5",
+        "timestamp": "2026-08-22T06:17:39.605Z",
+        "eventType": "EXPLANATION_GENERATED",
+        "actor": "AXIS_ONE",
+        "status": "FAILED",
+        "summary": "Recommendation explanation generated via FALLBACK.",
+        "details": {
+          "explanation": {
+            "recommendationExplanation": "NovaKey K75 at ₹4499 fits your criteria (matching your requirements).",
+            "upsellExplanation": "Suggested as compatible accessory in initial session.",
+            "budgetExplanation": "The total basket comes to ₹4898, leaving ₹0 within your ₹4898 budget.",
+            "policyExplanation": "All items passed inventory, pricing, and merchant policy checks.",
+            "summary": "Compared to the previous option (higher price), the NovaKey K75 (₹4499) adjusts your cost to ₹4898. Both fit within merchant policy rules.",
+            "source": "FALLBACK"
+          }
+        }
+      },
+      {
+        "id": "evt_1787379476684_4h95kdt",
+        "timestamp": "2026-08-22T06:17:56.684Z",
+        "eventType": "INTENT_RECEIVED",
+        "actor": "USER",
+        "status": "SUCCESS",
+        "summary": "User follow-up received. Action: REMOVE_UPSELL. Msg: \"remove wrist rest\"",
+        "details": {
+          "originalMessage": "remove wrist rest",
+          "classificationAction": "REMOVE_UPSELL",
+          "sessionId": "sess_1787379426906_xo5pxhn"
+        }
+      },
+      {
+        "id": "evt_1787379476684_qv68tdy",
+        "timestamp": "2026-08-22T06:17:56.684Z",
+        "eventType": "POLICY_VALIDATED",
+        "actor": "POLICY_ENGINE",
+        "status": "SUCCESS",
+        "summary": "Basket updated. Upsell removed. Policy check: PASSED",
+        "details": {
+          "basketItems": [
+            "NovaKey K75"
+          ],
+          "finalAmount": 4499
+        }
+      },
+      {
+        "id": "evt_1787379476994_hzedanq",
+        "timestamp": "2026-08-22T06:17:56.994Z",
+        "eventType": "EXPLANATION_GENERATED",
+        "actor": "AXIS_ONE",
+        "status": "FAILED",
+        "summary": "Recommendation explanation generated via FALLBACK.",
+        "details": {
+          "explanation": {
+            "recommendationExplanation": "NovaKey K75 at ₹4499 fits your criteria (matching your requirements).",
+            "upsellExplanation": "No complementary accessory is currently attached.",
+            "budgetExplanation": "The total basket comes to ₹4499, leaving ₹0 within your ₹4499 budget.",
+            "policyExplanation": "All items passed inventory, pricing, and merchant policy checks.",
+            "summary": "Done. I've removed the complementary accessory and kept the NovaKey K75 as your primary selection. Your basket total is updated to ₹4499.",
+            "source": "FALLBACK"
+          }
+        }
+      },
+      {
+        "id": "evt_1787379494298_hv8ulme",
+        "timestamp": "2026-08-22T06:18:14.298Z",
+        "eventType": "INTENT_RECEIVED",
+        "actor": "USER",
+        "status": "SUCCESS",
+        "summary": "User follow-up received. Action: CONFIRM_SELECTION. Msg: \"okay I'll take it\"",
+        "details": {
+          "originalMessage": "okay I'll take it",
+          "classificationAction": "CONFIRM_SELECTION",
+          "sessionId": "sess_1787379426906_xo5pxhn"
+        }
+      },
+      {
+        "id": "evt_1787379494298_vmtcm3e",
+        "timestamp": "2026-08-22T06:18:14.298Z",
+        "eventType": "USER_APPROVED",
+        "actor": "USER",
+        "status": "SUCCESS",
+        "summary": "User approved the proposed basket.",
+        "details": {
+          "selectedProducts": [
+            "NovaKey K75"
+          ],
+          "finalAmount": 4499,
+          "message": "Payment has not started yet."
+        }
+      },
+      {
+        "id": "evt_1787379494605_c60altw",
+        "timestamp": "2026-08-22T06:18:14.605Z",
+        "eventType": "EXPLANATION_GENERATED",
+        "actor": "AXIS_ONE",
+        "status": "FAILED",
+        "summary": "Recommendation explanation generated via FALLBACK.",
+        "details": {
+          "explanation": {
+            "recommendationExplanation": "NovaKey K75 at ₹4499 fits your criteria (matching your requirements).",
+            "upsellExplanation": "No complementary accessory is currently attached.",
+            "budgetExplanation": "The total basket comes to ₹4499, leaving ₹0 within your ₹4499 budget.",
+            "policyExplanation": "All items passed inventory, pricing, and merchant policy checks.",
+            "summary": "Great choice! Your basket with NovaKey K75 (₹4499) is locked in and ready for secure checkout.",
+            "source": "FALLBACK"
+          }
+        }
+      },
+      {
+        "id": "evt_1787379496957_8mgdic6",
+        "timestamp": "2026-08-22T06:18:16.957Z",
+        "eventType": "PAYMENT_INITIATED",
+        "actor": "AXIS_ONE",
+        "status": "PENDING",
+        "summary": "Razorpay payment order created for the confirmed basket.",
+        "details": {
+          "sessionId": "sess_1787379426906_xo5pxhn",
+          "razorpayOrderId": "order_TSiJbjzFt8X0Ze",
+          "amount": 449900,
+          "currency": "INR"
+        }
+      },
+      {
+        "id": "evt_1787379496998_c46su69",
+        "timestamp": "2026-08-22T06:18:16.998Z",
+        "eventType": "PAYMENT_INITIATED",
+        "actor": "USER",
+        "status": "SUCCESS",
+        "summary": "Payment is being processed.",
+        "details": {
+          "sessionId": "sess_1787379426906_xo5pxhn",
+          "newState": "PAYMENT_PROCESSING"
+        }
+      }
+    ]
+  }
+]
