@@ -1,4 +1,19 @@
-import { Product, UserIntent, RankedResult, UpsellOpportunity, ValidationResult, AuditEvent, WorkflowSuccessResponse, WorkflowFailureResponse, ExplanationContext, ExplanationResult, ConversationAction, CommerceConversationContext, TransactionState } from "./types";
+import { 
+  Product, 
+  UserIntent, 
+  RankedResult, 
+  UpsellOpportunity, 
+  ValidationResult, 
+  AuditEvent, 
+  WorkflowSuccessResponse, 
+  WorkflowFailureResponse, 
+  ExplanationContext, 
+  ExplanationResult, 
+  ConversationAction, 
+  CommerceConversationContext, 
+  TransactionState,
+  ResponseIntent
+} from "./types";
 import { getAllProducts, getProductById, searchProducts } from "./catalog";
 import { rankProducts } from "./ranking";
 import { findUpsellOpportunity } from "./upsell";
@@ -36,7 +51,7 @@ export async function runAgentWorkflow(
   }
 
   if (session) {
-    // 1. Classify user message in context of session
+    // 1. Classify user message in context of active session
     const classification = await classifyFollowUp(message, session);
     classificationAction = classification.action;
 
@@ -49,11 +64,39 @@ export async function runAgentWorkflow(
       details: { originalMessage: message, classificationAction, sessionId: activeSessionId }
     });
 
-    // 2. Route classification action
+    // 2. Dispatch to action-specific handler
     if (classificationAction === "NEW_SEARCH") {
       return executeNewSearch(message, activeSessionId!, requestedDiscount);
     } 
     
+    else if (classificationAction === "GREETING") {
+      if (!session.recommendedProduct) {
+        return executeNewSearch(message, activeSessionId!, requestedDiscount);
+      }
+
+      recommendation = {
+        product: session.recommendedProduct,
+        matchScore: 100,
+        matchedCriteria: ["Active selection from session"],
+        unmatchedCriteria: [],
+        reasoning: "Retained active selection."
+      };
+      upsell = session.currentUpsell ? {
+        recommendedProduct: session.currentUpsell,
+        originalTotal: session.recommendedProduct.price,
+        upsellAmount: session.currentUpsell.price,
+        newTotal: session.recommendedProduct.price + session.currentUpsell.price,
+        remainingBudget: Math.max(0, (session.originalIntent.budget ?? 0) - (session.recommendedProduct.price + session.currentUpsell.price)),
+        relevanceScore: 100,
+        reasoning: "Retained from session.",
+        approved: true
+      } : null;
+      basketItems = session.currentBasket;
+      originalTotal = basketItems.reduce((sum, p) => sum + p.price, 0);
+      policyValidation = validateTransaction(basketItems, session.originalIntent.budget ?? 999999, requestedDiscount);
+      transactionState = session.transactionState;
+    }
+
     else if (classificationAction === "REMOVE_UPSELL") {
       if (!session.recommendedProduct) {
         return handleEarlyFailure("POLICY_VALIDATION", "No recommended product in session context to remove upsell from.", activeSessionId!, classificationAction);
@@ -81,6 +124,21 @@ export async function runAgentWorkflow(
         details: { basketItems: basketItems.map(p => p.name), finalAmount: policyValidation.finalAmount }
       });
     } 
+
+    else if (classificationAction === "REMOVE_PRODUCT") {
+      recommendation = {
+        product: session.recommendedProduct || getAllProducts()[0],
+        matchScore: 0,
+        matchedCriteria: [],
+        unmatchedCriteria: [],
+        reasoning: "Product removed."
+      };
+      upsell = null;
+      basketItems = [];
+      originalTotal = 0;
+      policyValidation = validateTransaction(basketItems, session.originalIntent.budget ?? 999999, requestedDiscount);
+      transactionState = "EXPLORING";
+    }
     
     else if (classificationAction === "CHANGE_BUDGET") {
       const currentIntent = session.latestIntent || session.originalIntent;
@@ -93,7 +151,7 @@ export async function runAgentWorkflow(
       return executeWorkflowWithIntent(updatedIntent, activeSessionId!, classificationAction, requestedDiscount, message);
     } 
     
-    else if (classificationAction === "REQUEST_CHEAPER_OPTION") {
+    else if (classificationAction === "REQUEST_CHEAPER" || classificationAction === "REQUEST_CHEAPER_OPTION") {
       if (!session.recommendedProduct) {
         return handleEarlyFailure("POLICY_VALIDATION", "No recommended product in session context to find cheaper option for.", activeSessionId!, classificationAction);
       }
@@ -180,9 +238,42 @@ export async function runAgentWorkflow(
         summary: `Cheaper option selected: ${recommendation.product.name}. Policy check: ${policyValidation.approved ? "PASSED" : "FAILED"}`,
         details: { basketItems: basketItems.map(p => p.name), finalAmount: policyValidation.finalAmount }
       });
-    } 
+    }
+
+    else if (classificationAction === "REQUEST_ALTERNATIVE") {
+      if (!session.recommendedProduct) {
+        return executeNewSearch(message, activeSessionId!, requestedDiscount);
+      }
+
+      const category = session.recommendedProduct.category;
+      const currentId = session.recommendedProduct.id;
+      const intentToUse = session.latestIntent || session.originalIntent;
+      const budgetLimit = intentToUse.budget ?? 999999;
+
+      const altCandidates = getAllProducts().filter(p =>
+        p.category.toLowerCase() === category.toLowerCase() &&
+        p.id !== currentId &&
+        p.stock >= 1 &&
+        p.price <= budgetLimit
+      );
+
+      if (altCandidates.length === 0) {
+        return executeWorkflowWithIntent(intentToUse, activeSessionId!, classificationAction, requestedDiscount, message);
+      }
+
+      const rankedAlts = rankProducts(altCandidates, intentToUse);
+      recommendation = rankedAlts[0];
+      upsell = findUpsellOpportunity(recommendation.product, getAllProducts(), budgetLimit, intentToUse);
+      basketItems = [recommendation.product];
+      if (upsell) {
+        basketItems.push(upsell.recommendedProduct);
+      }
+      originalTotal = recommendation.product.price + (upsell ? upsell.recommendedProduct.price : 0);
+      policyValidation = validateTransaction(basketItems, budgetLimit, requestedDiscount);
+      transactionState = policyValidation.approved ? "AWAITING_USER_APPROVAL" : "BLOCKED";
+    }
     
-    else if (classificationAction === "MODIFY_REQUIREMENTS") {
+    else if (classificationAction === "CHANGE_REQUIREMENT" || classificationAction === "MODIFY_REQUIREMENTS") {
       const intentToUpdate = session.latestIntent || session.originalIntent;
       const updatedIntent = {
         ...intentToUpdate,
@@ -204,9 +295,9 @@ export async function runAgentWorkflow(
       recommendation = rankResult || {
         product: session.recommendedProduct,
         matchScore: 100,
-        matchedCriteria: [],
+        matchedCriteria: session.recommendedProduct.tags,
         unmatchedCriteria: [],
-        reasoning: "Retained from session."
+        reasoning: "Retained from active session."
       };
       
       upsell = session.currentUpsell ? {
@@ -268,9 +359,24 @@ export async function runAgentWorkflow(
         }
       });
     } 
+
+    else if (classificationAction === "CANCEL_SELECTION") {
+      recommendation = {
+        product: session.recommendedProduct || getAllProducts()[0],
+        matchScore: 100,
+        matchedCriteria: [],
+        unmatchedCriteria: [],
+        reasoning: "Order cancelled by user."
+      };
+      upsell = null;
+      basketItems = session.currentBasket;
+      originalTotal = basketItems.reduce((sum, p) => sum + p.price, 0);
+      policyValidation = validateTransaction(basketItems, session.originalIntent.budget ?? 999999, requestedDiscount);
+      transactionState = "EXPLORING";
+    }
     
     else {
-      // GENERAL_FOLLOW_UP
+      // GENERAL_QUESTION / GENERAL_FOLLOW_UP
       if (!session.recommendedProduct) {
         return executeNewSearch(message, activeSessionId!, requestedDiscount);
       }
@@ -278,7 +384,7 @@ export async function runAgentWorkflow(
       recommendation = {
         product: session.recommendedProduct,
         matchScore: 90,
-        matchedCriteria: ["Retained from session"],
+        matchedCriteria: session.recommendedProduct.tags,
         unmatchedCriteria: [],
         reasoning: "Retained from session."
       };
@@ -369,20 +475,26 @@ export async function runAgentWorkflow(
 
     session.recentMessages.push({ role: "USER", content: message });
     session.recentMessages.push({ role: "AXIS_ONE", content: explanation.summary });
+    session.conversationHistory = session.recentMessages;
+    session.previousBasket = session.currentBasket;
     session.currentBasket = basketItems;
     session.currentUpsell = upsell ? upsell.recommendedProduct : null;
     if (session.recommendedProduct && session.recommendedProduct.id !== recommendation.product.id) {
       session.previousProduct = session.recommendedProduct;
     }
     session.recommendedProduct = recommendation.product;
+    session.currentProduct = recommendation.product;
     session.policyStatus = policyValidation.approved;
     session.transactionState = transactionState;
     session.requestedDiscount = requestedDiscount;
+    session.lastAction = classificationAction;
+    session.lastUserQuery = message;
+    session.tradeoffs = explanationContext.tradeoffs;
     saveSession(session);
 
     return {
       success: true,
-      message: "Follow-up request processed successfully.",
+      message: explanation.summary,
       intent: session.latestIntent || session.originalIntent,
       recommendation,
       upsell,
@@ -508,7 +620,7 @@ async function executeWorkflowWithIntent(
       auditTrail: getAuditTrail(),
       explanation: {
         ...explanationFallback,
-        summary: "No suitable products were found in Nexora Tech catalog.",
+        summary: "No suitable products were found in Nexora Tech catalog matching your criteria.",
         source: "FALLBACK"
       },
       sessionId,
@@ -684,36 +796,56 @@ async function executeWorkflowWithIntent(
   const sessionToSave: CommerceConversationContext = existingSession ? {
     ...existingSession,
     latestIntent: intent,
+    latestRequirements: intent,
+    category: intent.productCategory,
+    budget: intent.budget,
     recommendedProduct: recommendation.product,
+    currentProduct: recommendation.product,
     currentUpsell: upsell ? upsell.recommendedProduct : null,
+    previousBasket: existingSession.currentBasket,
     currentBasket: basketItems,
     policyStatus: isApproved,
     transactionState,
     requestedDiscount,
-    previousProduct: previousProduct || null
+    previousProduct: previousProduct || null,
+    lastAction: conversationAction,
+    lastUserQuery: userMessage,
+    tradeoffs: explanationContext.tradeoffs
   } : {
     sessionId,
     originalIntent: intent,
+    originalRequirements: intent,
+    latestIntent: intent,
+    latestRequirements: intent,
+    category: intent.productCategory,
+    budget: intent.budget,
     recommendedProduct: recommendation.product,
+    currentProduct: recommendation.product,
     currentUpsell: upsell ? upsell.recommendedProduct : null,
     currentBasket: basketItems,
+    previousBasket: [],
     policyStatus: isApproved,
     transactionState,
     recentMessages: [],
+    conversationHistory: [],
     requestedDiscount,
-    previousProduct: previousProduct || null
+    previousProduct: previousProduct || null,
+    lastAction: conversationAction,
+    lastUserQuery: userMessage,
+    tradeoffs: explanationContext.tradeoffs
   };
 
   if (userMessage) {
     sessionToSave.recentMessages.push({ role: "USER", content: userMessage });
   }
   sessionToSave.recentMessages.push({ role: "AXIS_ONE", content: explanation.summary });
+  sessionToSave.conversationHistory = sessionToSave.recentMessages;
   saveSession(sessionToSave);
 
   if (isApproved) {
     return {
       success: true,
-      message: "Commerce recommendation generated successfully.",
+      message: explanation.summary,
       intent,
       recommendation,
       upsell,
@@ -776,6 +908,9 @@ function calculateTradeoffs(originalIntent: UserIntent, product: Product): strin
                      product.features.some(f => f.toLowerCase().includes("wireless"));
   if (originalIntent.wireless === true && !isWireless) {
     tradeoffs.push("The recommended product is wired, whereas you preferred a wireless option.");
+  }
+  if (originalIntent.budget && product.price > originalIntent.budget) {
+    tradeoffs.push(`Price of ₹${product.price} exceeds target budget of ₹${originalIntent.budget}.`);
   }
   return tradeoffs;
 }

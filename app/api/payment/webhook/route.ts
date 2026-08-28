@@ -104,18 +104,21 @@ export async function POST(request: NextRequest) {
         }
       });
 
-      // Persist order in filesystem
+      // Persist order in Firestore
       const basketAmount = session.currentBasket.reduce((sum, p) => sum + p.price, 0) - (session.requestedDiscount || 0);
-      saveOrder({
+      await saveOrder({
         orderId: orderId,
+        sessionId: session.sessionId,
         razorpayOrderId: orderId,
         razorpayPaymentId: paymentId,
+        items: session.currentBasket,
         basket: session.currentBasket,
         amount: Math.max(0, basketAmount),
         currency: "INR",
         transactionState: "PAYMENT_COMPLETED",
         timestamp: new Date().toISOString(),
-        auditHistory: getAuditTrail()
+        auditHistory: getAuditTrail(),
+        auditEvents: getAuditTrail()
       });
 
     } else if (event === "payment.failed") {

@@ -1,8 +1,15 @@
-import fs from "fs";
-import path from "path";
+import { POST as createOrderHandler } from "../app/api/payment/create-order/route";
+import { POST as verifyHandler } from "../app/api/payment/verify/route";
+import { POST as webhookHandler } from "../app/api/payment/webhook/route";
+import { POST as updateStateHandler } from "../app/api/payment/update-state/route";
+import { GET as ordersHandler } from "../app/api/payment/orders/route";
+import { POST as testSetupHandler } from "../app/api/payment/test-setup/route";
 import { Product, PersistentOrder } from "../lib/types";
+import { NextRequest } from "next/server";
 
-const ORDERS_FILE_PATH = path.join(process.cwd(), "data", "orders.json");
+process.env.RAZORPAY_KEY_ID = "rzp_test_key_id";
+process.env.RAZORPAY_KEY_SECRET = "rzp_test_key_secret";
+process.env.RAZORPAY_WEBHOOK_SECRET = "whsec_test_secret_for_unit_testing";
 
 // Sample keyboard product
 const testProduct: Product = {
@@ -19,34 +26,51 @@ const testProduct: Product = {
   compatibleWith: []
 };
 
-// Helper to make HTTP requests to the running server
+// Helper to make mock requests directly to route handlers
 async function callApi(endpoint: string, options: { method?: string; headers?: Record<string, string>; body?: any } = {}) {
+  const method = options.method || "POST";
   const url = `http://localhost:3000${endpoint}`;
-  const res = await fetch(url, {
-    method: options.method || "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {})
-    },
-    body: options.body ? JSON.stringify(options.body) : undefined
-  });
   
-  let json = {};
+  const headers = new Headers(options.headers || {});
+  if (!headers.has("Content-Type") && method !== "GET") {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const req = new NextRequest(url, {
+    method,
+    headers,
+    body: options.body ? (typeof options.body === "string" ? options.body : JSON.stringify(options.body)) : undefined
+  });
+
+  let res: Response;
+  if (endpoint.startsWith("/api/payment/create-order")) {
+    res = await createOrderHandler(req);
+  } else if (endpoint.startsWith("/api/payment/verify")) {
+    res = await verifyHandler(req);
+  } else if (endpoint.startsWith("/api/payment/webhook")) {
+    res = await webhookHandler(req);
+  } else if (endpoint.startsWith("/api/payment/update-state")) {
+    res = await updateStateHandler(req);
+  } else if (endpoint.startsWith("/api/payment/orders")) {
+    res = await ordersHandler(req);
+  } else if (endpoint.startsWith("/api/payment/test-setup")) {
+    res = await testSetupHandler(req);
+  } else {
+    throw new Error(`Unknown endpoint: ${endpoint}`);
+  }
+
+  let data = {};
   try {
-    json = await res.json();
+    data = await res.json();
   } catch (e) {}
 
-  return { status: res.status, data: json as any };
+  return { status: res.status, data: data as any };
 }
 
-// Local helper to read orders file directly
-function readOrdersFile(): PersistentOrder[] {
-  if (!fs.existsSync(ORDERS_FILE_PATH)) return [];
-  try {
-    return JSON.parse(fs.readFileSync(ORDERS_FILE_PATH, "utf-8") || "[]");
-  } catch (e) {
-    return [];
-  }
+// Helper to read persisted orders via the API
+async function getPersistedOrders(): Promise<PersistentOrder[]> {
+  const res = await callApi("/api/payment/orders", { method: "GET" });
+  return (res.data?.orders as PersistentOrder[]) || [];
 }
 
 async function runTests() {
@@ -73,7 +97,7 @@ async function runTests() {
   });
 
   // --------------------------------------------------
-  // TEST 1: Create Order
+  // TEST 1: Create Order & Verify State Transition to PENDING
   // --------------------------------------------------
   console.log("--- TEST 1: Create Order & Verify State Transition to PENDING ---");
   const createRes = await callApi("/api/payment/create-order", {
@@ -105,8 +129,8 @@ async function runTests() {
   console.log(" Verification Success:", verifyRes.data.success);
   console.log(" Final Transaction State:", verifyRes.data.transactionState);
 
-  // Check persistent storage file
-  const persistentOrders = readOrdersFile();
+  // Check persistent storage
+  const persistentOrders = await getPersistedOrders();
   console.log(" Persistent Orders Count:", persistentOrders.length);
   const retrievedOrder = persistentOrders.find(o => o.orderId === "order_mock_400");
   console.log(" Retrieved Order exists in file:", !!retrievedOrder);
@@ -126,7 +150,7 @@ async function runTests() {
   console.log("\n--- TEST 3: Webhook Reject Invalid Signature ---");
   const invalidWebhookRes = await callApi("/api/payment/webhook", {
     headers: { "x-razorpay-signature": "invalid_sig_here" },
-    body: { event: "order.paid", payload: { payment: { entity: { order_id: "order_mock_400", id: "pay_test_987" } } } }
+    body: JSON.stringify({ event: "order.paid", payload: { payment: { entity: { order_id: "order_mock_400", id: "pay_test_987" } } } })
   });
   console.log(" Webhook reject status:", invalidWebhookRes.status);
   if (invalidWebhookRes.status !== 400) {
@@ -152,7 +176,7 @@ async function runTests() {
 
   const validWebhookRes = await callApi("/api/payment/webhook", {
     headers: { "x-razorpay-signature": "valid_webhook_signature_for_test" },
-    body: {
+    body: JSON.stringify({
       event: "payment.captured",
       payload: {
         payment: {
@@ -163,12 +187,12 @@ async function runTests() {
           }
         }
       }
-    }
+    })
   });
   console.log(" Webhook accept status:", validWebhookRes.status);
 
-  // Check persistent storage file again
-  const ordersAfterWebhook = readOrdersFile();
+  // Check persistent storage again
+  const ordersAfterWebhook = await getPersistedOrders();
   const orderFromHook = ordersAfterWebhook.find(o => o.orderId === "order_webhook_001");
   console.log(" Webhook saved order to file:", !!orderFromHook);
   console.log(" Order state from hook:", orderFromHook?.transactionState);
@@ -185,7 +209,7 @@ async function runTests() {
   console.log("\n--- TEST 5: Webhook Idempotency & Overwrite Block ---");
   const failedWebhookRes = await callApi("/api/payment/webhook", {
     headers: { "x-razorpay-signature": "valid_webhook_signature_for_test" },
-    body: {
+    body: JSON.stringify({
       event: "payment.failed",
       payload: {
         payment: {
@@ -195,12 +219,12 @@ async function runTests() {
           }
         }
       }
-    }
+    })
   });
   console.log(" Webhook processing status for failed event:", failedWebhookRes.status);
   
-  // Re-read file to verify order remains completed
-  const ordersAfterFailedHook = readOrdersFile();
+  // Re-read storage to verify order remains completed
+  const ordersAfterFailedHook = await getPersistedOrders();
   const orderAfterFailed = ordersAfterFailedHook.find(o => o.orderId === "order_webhook_001");
   console.log(" Order remains completed in file:", orderAfterFailed?.transactionState === "PAYMENT_COMPLETED");
 
@@ -227,18 +251,18 @@ async function runTests() {
     }
   });
 
-  const failUpdateRes = await callApi("/api/payment/update-state", {
+  const failRes = await callApi("/api/payment/update-state", {
     body: {
       sessionId: failedSessionId,
       newState: "PAYMENT_FAILED",
-      errorDetails: "Mock payment failure test"
+      errorDetails: "Card declined by issuing bank"
     }
   });
-  console.log(" Fail Status:", failUpdateRes.status);
-  console.log(" New State is PAYMENT_FAILED:", failUpdateRes.data.transactionState === "PAYMENT_FAILED");
+  console.log(" Fail Status:", failRes.status);
+  console.log(" New State is PAYMENT_FAILED:", failRes.data.transactionState === "PAYMENT_FAILED");
 
-  if (failUpdateRes.status !== 200 || failUpdateRes.data.transactionState !== "PAYMENT_FAILED") {
-    console.error("Test 6 FAILED: Failed state update failed.");
+  if (failRes.status !== 200 || failRes.data.transactionState !== "PAYMENT_FAILED") {
+    console.error("Test 6 FAILED: Failed to transition to PAYMENT_FAILED.");
     process.exit(1);
   }
   console.log(">> TEST 6 PASSED!");
@@ -260,52 +284,51 @@ async function runTests() {
     }
   });
 
-  const cancelUpdateRes = await callApi("/api/payment/update-state", {
+  const cancelRes = await callApi("/api/payment/update-state", {
     body: {
       sessionId: cancelSessionId,
       newState: "PAYMENT_CANCELLED"
     }
   });
-  console.log(" Cancel Status:", cancelUpdateRes.status);
-  console.log(" New State is PAYMENT_CANCELLED:", cancelUpdateRes.data.transactionState === "PAYMENT_CANCELLED");
+  console.log(" Cancel Status:", cancelRes.status);
+  console.log(" New State is PAYMENT_CANCELLED:", cancelRes.data.transactionState === "PAYMENT_CANCELLED");
 
-  if (cancelUpdateRes.status !== 200 || cancelUpdateRes.data.transactionState !== "PAYMENT_CANCELLED") {
-    console.error("Test 7 FAILED: Cancelled state update failed.");
+  if (cancelRes.status !== 200 || cancelRes.data.transactionState !== "PAYMENT_CANCELLED") {
+    console.error("Test 7 FAILED: Failed to transition to PAYMENT_CANCELLED.");
     process.exit(1);
   }
   console.log(">> TEST 7 PASSED!");
 
   // --------------------------------------------------
-  // TEST 8: Invalid State Transition Validation
+  // TEST 8: Rejection of Invalid State Transitions
   // --------------------------------------------------
   console.log("\n--- TEST 8: Rejection of Invalid State Transitions ---");
-  const completedTransitionRes = await callApi("/api/payment/update-state", {
+  const invalidTransitionRes = await callApi("/api/payment/update-state", {
     body: {
-      sessionId: testSessionId, // State is PAYMENT_COMPLETED
-      newState: "PAYMENT_FAILED"
+      sessionId: testSessionId, // Currently PAYMENT_COMPLETED
+      newState: "PAYMENT_PENDING"
     }
   });
-  console.log(" Server rejected update on COMPLETED order status:", completedTransitionRes.status);
-
-  if (completedTransitionRes.status !== 400) {
-    console.error("Test 8 FAILED: State transition protection failed.");
+  console.log(" Server rejected update on COMPLETED order status:", invalidTransitionRes.status);
+  if (invalidTransitionRes.status !== 400) {
+    console.error("Test 8 FAILED: Server allowed an invalid transition on completed order.");
     process.exit(1);
   }
   console.log(">> TEST 8 PASSED!");
 
   // --------------------------------------------------
-  // TEST 9: Payment Retry Capability
+  // TEST 9: Payment Retry (PAYMENT_FAILED -> PAYMENT_PENDING)
   // --------------------------------------------------
   console.log("\n--- TEST 9: Payment Retry (FAILED -> PENDING) ---");
   const retryRes = await callApi("/api/payment/create-order", {
-    body: { sessionId: failedSessionId } // State is currently PAYMENT_FAILED
+    body: { sessionId: failedSessionId } // Currently PAYMENT_FAILED
   });
   console.log(" Retry Status:", retryRes.status);
   console.log(" Retried Order ID created:", retryRes.data.order?.id);
   console.log(" State restored to PAYMENT_PENDING:", retryRes.data.transactionState === "PAYMENT_PENDING");
 
   if (retryRes.status !== 200 || retryRes.data.transactionState !== "PAYMENT_PENDING") {
-    console.error("Test 9 FAILED: Payment retry failed.");
+    console.error("Test 9 FAILED: Failed to retry payment from PAYMENT_FAILED state.");
     process.exit(1);
   }
   console.log(">> TEST 9 PASSED!");

@@ -159,13 +159,21 @@ export interface ExplanationResult {
 
 export type ConversationAction =
   | "NEW_SEARCH"
-  | "REMOVE_UPSELL"
   | "CHANGE_BUDGET"
+  | "REMOVE_UPSELL"
+  | "REMOVE_PRODUCT"
+  | "REQUEST_CHEAPER"
   | "REQUEST_CHEAPER_OPTION"
+  | "REQUEST_ALTERNATIVE"
   | "REQUEST_EXPLANATION"
-  | "CONFIRM_SELECTION"
+  | "CHANGE_REQUIREMENT"
   | "MODIFY_REQUIREMENTS"
-  | "GENERAL_FOLLOW_UP";
+  | "CONFIRM_SELECTION"
+  | "CANCEL_SELECTION"
+  | "GREETING"
+  | "GENERAL_QUESTION"
+  | "GENERAL_FOLLOW_UP"
+  | "UNKNOWN";
 
 export type TransactionState =
   | "EXPLORING"
@@ -181,34 +189,55 @@ export type TransactionState =
 
 export interface PersistentOrder {
   orderId: string;
+  sessionId?: string;
   razorpayOrderId: string;
   razorpayPaymentId?: string;
+  items?: Product[];
   basket: Product[];
   amount: number;
   currency: string;
   transactionState: TransactionState;
+  createdAt?: string;
+  updatedAt?: string;
   timestamp: string;
+  auditEvents?: AuditEvent[];
   auditHistory: AuditEvent[];
 }
 
 export interface CommerceConversationContext {
   sessionId: string;
   originalIntent: UserIntent;
+  originalRequirements?: UserIntent;
   latestIntent?: UserIntent;
+  latestRequirements?: UserIntent;
+  category?: string;
+  budget?: number;
+  preferredFeatures?: string[];
+  excludedFeatures?: string[];
   recommendedProduct?: Product;
+  currentProduct?: Product | null;
+  previousProduct?: Product | null;
   currentUpsell?: Product | null;
+  upsells?: Product[];
   currentBasket: Product[];
+  previousBasket?: Product[];
   policyStatus?: boolean;
   transactionState: TransactionState;
   recentMessages: Array<{
     role: "USER" | "AXIS_ONE";
     content: string;
   }>;
+  conversationHistory?: Array<{
+    role: "USER" | "AXIS_ONE";
+    content: string;
+  }>;
+  lastAction?: ConversationAction;
+  lastUserQuery?: string;
+  tradeoffs?: string[];
   razorpayOrderId?: string;
   razorpayPaymentId?: string;
   lastBasketHash?: string;
   requestedDiscount?: number;
-  previousProduct?: Product | null;
 }
 
 export interface WorkflowSuccessResponse {

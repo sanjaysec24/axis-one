@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
 
     if (action === "clear") {
       clearAllSessions();
-      clearAllOrders();
+      await clearAllOrders();
       return NextResponse.json({ success: true });
     }
 

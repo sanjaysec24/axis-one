@@ -107,16 +107,19 @@ export async function POST(request: NextRequest) {
     saveSession(session);
 
     // Save order to persistent storage
-    saveOrder({
+    await saveOrder({
       orderId: razorpay_order_id,
+      sessionId,
       razorpayOrderId: razorpay_order_id,
       razorpayPaymentId: razorpay_payment_id,
+      items: session.currentBasket,
       basket: session.currentBasket,
       amount: Math.max(0, basketAmount),
       currency: "INR",
       transactionState: "PAYMENT_COMPLETED",
       timestamp: new Date().toISOString(),
-      auditHistory: getAuditTrail()
+      auditHistory: getAuditTrail(),
+      auditEvents: getAuditTrail()
     });
 
     // 8. Record PAYMENT_COMPLETED audit event

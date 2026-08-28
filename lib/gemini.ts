@@ -162,12 +162,12 @@ export function deriveResponseIntent(
   const query = (userQuery || "").toLowerCase().trim();
 
   // 1. Greetings
-  if (/^(hi|hello|hey|greetings|good\s*(morning|afternoon|evening))\b/i.test(query) || query === "hi" || query === "hello" || query === "hey") {
+  if (action === "GREETING" || /^(hi|hello|hey|greetings|good\s*(morning|afternoon|evening))\b/i.test(query) || query === "hi" || query === "hello" || query === "hey") {
     return "GREETING";
   }
 
   // 2. Direct payment inquiries
-  if (/\b(payment|checkout|pay|how to pay|where to pay|proceed to pay)\b/i.test(query)) {
+  if (/\b(payment|checkout|how to pay|where to pay|proceed to pay|pay now)\b/i.test(query)) {
     return "PAYMENT_GUIDANCE";
   }
 
@@ -175,14 +175,20 @@ export function deriveResponseIntent(
   if (action === "CONFIRM_SELECTION") {
     return "CONFIRMATION";
   }
-  if (action === "REMOVE_UPSELL") {
+  if (action === "CANCEL_SELECTION") {
+    return "PAYMENT_CANCELLED";
+  }
+  if (action === "REMOVE_UPSELL" || action === "REMOVE_PRODUCT") {
     return "REMOVE_UPSELL";
   }
   if (action === "CHANGE_BUDGET") {
     return "BUDGET_UPDATE";
   }
-  if (action === "REQUEST_CHEAPER_OPTION") {
+  if (action === "REQUEST_CHEAPER" || action === "REQUEST_CHEAPER_OPTION") {
     return "CHEAPER_ALTERNATIVE";
+  }
+  if (action === "REQUEST_ALTERNATIVE") {
+    return "PRODUCT_COMPARISON";
   }
   if (action === "REQUEST_EXPLANATION") {
     if (previousProduct || /\b(compare|vs|instead of|difference|versus)\b/i.test(query)) {
@@ -221,16 +227,16 @@ export async function generateExplanation(
   const systemInstruction = 
     "You are AXIS ONE, an intelligent AI commerce buyer and recommendation advisor.\n\n" +
     "Your job is to generate a helpful, natural, non-repetitive, context-aware response for the user based strictly on the provided structured commerce data.\n\n" +
-    "ADAPTIVE LENGTH & TONE GUIDELINES:\n" +
-    "1. SIMPLE ACTIONS (CONFIRMATION, REMOVE_UPSELL, GREETING, PAYMENT_GUIDANCE): 1–2 short, confident, friendly sentences. Do NOT re-pitch the entire product.\n" +
-    "2. INITIAL RECOMMENDATION / NEW SEARCH: 2–4 concise, polished sentences highlighting the core product match, budget flexibility (remaining budget), and optional complementary accessory.\n" +
-    "3. EXPLANATIONS & COMPARISONS (REQUEST_EXPLANATION, PRODUCT_COMPARISON, CHEAPER_ALTERNATIVE): 3–5 informative sentences explaining why the product was chosen, comparing key criteria against previous recommendations or alternatives, and explicitly disclosing any trade-offs (e.g., wired vs wireless) without fluff.\n" +
-    "4. BUDGET UPDATE: 2 sentences confirming the recalculated budget and why the new selection fits best.\n\n" +
-    "RULES:\n" +
-    "- Never repeat generic robotic filler like 'AXIS ONE recommends' or 'matches your request because it has good battery life'.\n" +
-    "- Use only the provided facts, prices, discounts, and policy validation results.\n" +
-    "- Do not invent products or attributes.\n" +
-    "- Address the user's specific action/intent directly in the 'summary' field.";
+    "CRITICAL CONVERSATIONAL RULES:\n" +
+    "1. NEVER repeat generic canned pitches across multiple conversation turns.\n" +
+    "2. If the user asks a specific question (e.g., 'Is it wireless?', 'Why did you recommend this?', 'Remove the wrist rest'), ANSWER THAT SPECIFIC QUESTION DIRECTLY in the 'summary' field.\n" +
+    "3. GREETING: 1 short sentence greeting the user and acknowledging their active item if one exists.\n" +
+    "4. CONFIRMATION: 1 sentence confirming the basket is locked in for checkout, and directing them to click 'Pay securely via Razorpay' in the right-hand panel.\n" +
+    "5. REMOVE_UPSELL / REMOVE_PRODUCT: 1 sentence confirming the removal and stating the updated basket total.\n" +
+    "6. CHEAPER_ALTERNATIVE / REQUEST_CHEAPER: 2 sentences naming the cheaper option, exact price, savings compared to previous selection, and any trade-off (e.g. wired vs wireless).\n" +
+    "7. BUDGET_UPDATE: 2 sentences confirming the recalculated budget and why the new recommendation fits best.\n" +
+    "8. REQUEST_EXPLANATION / PRODUCT_COMPARISON: 2–3 informative sentences detailing why this product scored highest, key matching criteria, and trade-offs.\n" +
+    "9. Use only the provided facts, prices, discounts, and policy validation results. Do not invent features or prices.";
 
   const model = genAI.getGenerativeModel({
     model: "gemini-3.5-flash",
@@ -258,7 +264,7 @@ export async function generateExplanation(
           },
           summary: {
             type: SchemaType.STRING,
-            description: "The primary conversational response displayed to the user in the chat feed. Must follow the adaptive length guidelines for the specific responseIntent."
+            description: "The primary conversational response displayed to the user in the chat feed. Must answer the user's latest query directly."
           }
         },
         required: [
@@ -272,7 +278,7 @@ export async function generateExplanation(
     }
   });
 
-  const prompt = `Generate an adaptive, context-aware commerce response for responseIntent="${responseIntent}" based ONLY on this structured recommendation context:\n\n${JSON.stringify({ ...context, responseIntent }, null, 2)}`;
+  const prompt = `Generate an adaptive, context-aware commerce response for responseIntent="${responseIntent}" and userQuery="${context.userQuery || ''}" based ONLY on this structured recommendation context:\n\n${JSON.stringify({ ...context, responseIntent }, null, 2)}`;
   
   try {
     const result = await model.generateContent(prompt);
@@ -332,6 +338,8 @@ export function generateFallbackExplanation(
     recentMessages
   );
 
+  const query = (userQuery || "").toLowerCase().trim();
+
   // 1. Recommendation Explanation
   const batteryStr = recommendation.matchedCriteria.find(c => c.toLowerCase().includes("battery")) || "";
   const batteryPart = batteryStr ? `provides ${batteryStr.toLowerCase()}` : "";
@@ -370,112 +378,138 @@ export function generateFallbackExplanation(
   // 5. Context-Aware Adaptive Summary
   let summary = "";
 
-  switch (responseIntent) {
-    case "GREETING": {
-      summary = `Hey! Your current selection of the ${recommendation.name} (₹${recommendation.price}) is active. Would you like to compare it, adjust your budget, or proceed to checkout?`;
-      break;
+  // Check for specific product feature / spec questions first
+  if (query.includes("is it wireless") || query.includes("is it cordless") || query.includes("wireless?")) {
+    const isWireless = recommendation.matchedCriteria.some(c => c.toLowerCase().includes("wireless"));
+    if (isWireless) {
+      summary = `Yes, the ${recommendation.name} is wireless, featuring dual-mode connectivity with long battery life.`;
+    } else {
+      summary = `No, the ${recommendation.name} is a wired keyboard connecting via a reliable USB-C cable for low latency.`;
     }
-
-    case "INITIAL_RECOMMENDATION": {
-      const budgetClause = intent.budget ? `Based on your ₹${intent.budget} budget and preferences` : "Based on your requirements";
-      const remainingClause = basket.remainingBudget > 0 ? ` It leaves ₹${basket.remainingBudget} in budget flexibility.` : "";
-      const upsellClause = upsell ? ` I've also paired it with an optional ${upsell.name} (₹${upsell.price}) for better ergonomics.` : "";
-      summary = `${budgetClause}, I recommend the ${recommendation.name} (₹${recommendation.price}).${remainingClause}${upsellClause}`;
-      break;
+  } else if (query.includes("is it wired") || query.includes("wired?")) {
+    const isWired = recommendation.matchedCriteria.some(c => c.toLowerCase().includes("wired")) || !recommendation.matchedCriteria.some(c => c.toLowerCase().includes("wireless"));
+    if (isWired) {
+      summary = `Yes, the ${recommendation.name} is a wired model connected via USB-C.`;
+    } else {
+      summary = `No, the ${recommendation.name} is wireless with multi-device Bluetooth and 2.4GHz connectivity.`;
     }
-
-    case "BUDGET_UPDATE": {
-      const wirelessPreserved = recommendation.matchedCriteria.some(c => c.toLowerCase().includes("wireless")) ? " while preserving your wireless preference" : "";
-      summary = `Got it — I've recalculated the options for your new ₹${intent.budget} budget. The ${recommendation.name} (₹${recommendation.price}) fits best${wirelessPreserved}.`;
-      break;
+  } else if (query.includes("battery") || query.includes("how long does battery") || query.includes("battery life")) {
+    const batteryMatch = recommendation.matchedCriteria.find(c => c.toLowerCase().includes("battery"));
+    if (batteryMatch) {
+      summary = `The ${recommendation.name} provides ${batteryMatch.toLowerCase()} on a single charge.`;
+    } else {
+      summary = `The ${recommendation.name} is wired via USB-C, so it draws power directly without needing batteries.`;
     }
-
-    case "CHEAPER_ALTERNATIVE": {
-      let tradeOffText = "";
-      if (tradeoffs && tradeoffs.length > 0) {
-        tradeOffText = ` The trade-off is: ${tradeoffs.join(" ")}`;
-      } else {
-        tradeOffText = " It provides essential core functionality at a lower price point.";
+  } else if (query.includes("mac") || query.includes("macos") || query.includes("apple")) {
+    summary = `Yes, the ${recommendation.name} works seamlessly with macOS, Windows, and Linux.`;
+  } else {
+    switch (responseIntent) {
+      case "GREETING": {
+        summary = `Hey! Your current selection of the ${recommendation.name} (₹${recommendation.price}) is active. Would you like to compare it, adjust your budget, or proceed to checkout?`;
+        break;
       }
-      const savings = previousProduct ? previousProduct.price - recommendation.price : 0;
-      const savingsText = savings > 0 ? ` (saving ₹${savings})` : "";
-      summary = `I found a cheaper option: ${recommendation.name} at ₹${recommendation.price}${savingsText}.${tradeOffText}`;
-      break;
-    }
 
-    case "REMOVE_UPSELL": {
-      summary = `Done. I've removed the complementary accessory and kept the ${recommendation.name} as your primary selection. Your basket total is updated to ₹${basket.total}.`;
-      break;
-    }
-
-    case "ADD_UPSELL": {
-      const upsellName = upsell ? upsell.name : "accessory";
-      summary = `Added the ${upsellName} to your basket. Your updated total is ₹${basket.total}, which stays within your budget.`;
-      break;
-    }
-
-    case "REQUEST_EXPLANATION": {
-      const matchCriteria = recommendation.matchedCriteria.length > 0 ? recommendation.matchedCriteria.join(", ") : "your search criteria";
-      let tradeText = "";
-      if (tradeoffs && tradeoffs.length > 0) {
-        tradeText = ` Note trade-offs: ${tradeoffs.join(" ")}`;
+      case "INITIAL_RECOMMENDATION": {
+        const budgetClause = intent.budget ? `Based on your ₹${intent.budget} budget and preferences` : "Based on your requirements";
+        const remainingClause = basket.remainingBudget > 0 ? ` It leaves ₹${basket.remainingBudget} in budget flexibility.` : "";
+        const upsellClause = upsell ? ` I've also paired it with an optional ${upsell.name} (₹${upsell.price}) for better ergonomics.` : "";
+        summary = `${budgetClause}, I recommend the ${recommendation.name} (₹${recommendation.price}).${remainingClause}${upsellClause}`;
+        break;
       }
-      summary = `I recommended the ${recommendation.name} because it satisfies your strongest requirements (${matchCriteria}) at ₹${recommendation.price}. It scored highest in our catalog evaluation with verified stock and merchant policy compliance.${tradeText}`;
-      break;
-    }
 
-    case "PRODUCT_COMPARISON": {
-      const prevName = previousProduct ? previousProduct.name : "the previous option";
-      const prevPrice = previousProduct ? `₹${previousProduct.price}` : "higher price";
-      let tradeText = "";
-      if (tradeoffs && tradeoffs.length > 0) {
-        tradeText = ` Key trade-offs: ${tradeoffs.join(" ")}`;
+      case "BUDGET_UPDATE": {
+        const wirelessPreserved = recommendation.matchedCriteria.some(c => c.toLowerCase().includes("wireless")) ? " while preserving your wireless preference" : "";
+        summary = `Got it — I've recalculated the options for your new ₹${intent.budget} budget. The ${recommendation.name} (₹${recommendation.price}) fits best${wirelessPreserved}.`;
+        break;
       }
-      summary = `Compared to ${prevName} (${prevPrice}), the ${recommendation.name} (₹${recommendation.price}) adjusts your cost to ₹${basket.total}.${tradeText} Both fit within merchant policy rules.`;
-      break;
-    }
 
-    case "CONFIRMATION": {
-      summary = `Great choice! Your basket with ${recommendation.name} (₹${basket.total}) is locked in and ready for secure checkout.`;
-      break;
-    }
-
-    case "PAYMENT_GUIDANCE": {
-      if (transactionState === "USER_CONFIRMED") {
-        summary = `Your basket is confirmed! Click the 'Pay securely via Razorpay' button in the Proposed Basket panel on the right to complete checkout in test mode.`;
-      } else if (transactionState === "PAYMENT_CANCELLED" || transactionState === "PAYMENT_FAILED") {
-        summary = `Your basket is saved. Click 'Retry Payment Checkout' on the right whenever you're ready to proceed.`;
-      } else {
-        summary = `When you're ready to buy, simply say 'Okay, I'll take it' to confirm your basket and unlock checkout.`;
+      case "CHEAPER_ALTERNATIVE": {
+        let tradeOffText = "";
+        if (tradeoffs && tradeoffs.length > 0) {
+          tradeOffText = ` The trade-off is: ${tradeoffs.join(" ")}`;
+        } else {
+          tradeOffText = " It provides essential core functionality at a lower price point.";
+        }
+        const savings = previousProduct ? previousProduct.price - recommendation.price : 0;
+        const savingsText = savings > 0 ? ` (saving ₹${savings})` : "";
+        summary = `I found a cheaper option: ${recommendation.name} at ₹${recommendation.price}${savingsText}.${tradeOffText}`;
+        break;
       }
-      break;
-    }
 
-    case "PAYMENT_SUCCESS": {
-      summary = `Payment verified successfully! Your order has been recorded in the database and your receipt is displayed on the right.`;
-      break;
-    }
-
-    case "PAYMENT_FAILED": {
-      summary = `The payment didn't go through, but your basket is safely retained. You can retry checkout whenever you're ready.`;
-      break;
-    }
-
-    case "PAYMENT_CANCELLED": {
-      summary = `Checkout was cancelled. Your proposed basket remains saved and ready for whenever you want to retry.`;
-      break;
-    }
-
-    case "GENERAL_FOLLOW_UP":
-    default: {
-      if (previousProduct || (tradeoffs && tradeoffs.length > 0)) {
-        let tradeText = tradeoffs && tradeoffs.length > 0 ? ` Note trade-offs: ${tradeoffs.join(" ")}` : "";
-        const prevText = previousProduct ? ` This replaces ${previousProduct.name} (₹${previousProduct.price}).` : "";
-        summary = `${recommendation.name} (₹${recommendation.price}) is selected.${prevText}${tradeText}`;
-      } else {
-        summary = `I've updated your selection with the ${recommendation.name} (₹${recommendation.price}). The basket total is ₹${basket.total}, which complies with all merchant policies.`;
+      case "REMOVE_UPSELL": {
+        summary = `Done. I've removed the complementary accessory and kept the ${recommendation.name} as your primary selection. Your basket total is updated to ₹${basket.total}.`;
+        break;
       }
-      break;
+
+      case "ADD_UPSELL": {
+        const upsellName = upsell ? upsell.name : "accessory";
+        summary = `Added the ${upsellName} to your basket. Your updated total is ₹${basket.total}, which stays within your budget.`;
+        break;
+      }
+
+      case "REQUEST_EXPLANATION": {
+        const matchCriteria = recommendation.matchedCriteria.length > 0 ? recommendation.matchedCriteria.join(", ") : "your search criteria";
+        let tradeText = "";
+        if (tradeoffs && tradeoffs.length > 0) {
+          tradeText = ` Note trade-offs: ${tradeoffs.join(" ")}`;
+        }
+        summary = `I recommended the ${recommendation.name} because it satisfies your strongest requirements (${matchCriteria}) at ₹${recommendation.price}. It scored highest in our catalog evaluation with verified stock and merchant policy compliance.${tradeText}`;
+        break;
+      }
+
+      case "PRODUCT_COMPARISON": {
+        const prevName = previousProduct ? previousProduct.name : "the previous option";
+        const prevPrice = previousProduct ? `₹${previousProduct.price}` : "higher price";
+        let tradeText = "";
+        if (tradeoffs && tradeoffs.length > 0) {
+          tradeText = ` Key trade-offs: ${tradeoffs.join(" ")}`;
+        }
+        summary = `Compared to ${prevName} (${prevPrice}), the ${recommendation.name} (₹${recommendation.price}) adjusts your cost to ₹${basket.total}.${tradeText} Both fit within merchant policy rules.`;
+        break;
+      }
+
+      case "CONFIRMATION": {
+        summary = `Great choice! Your basket with ${recommendation.name} is locked in and ready for secure checkout.`;
+        break;
+      }
+
+      case "PAYMENT_GUIDANCE": {
+        if (transactionState === "USER_CONFIRMED") {
+          summary = `Your basket is confirmed! Click the 'Pay securely via Razorpay' button in the Proposed Basket panel on the right to complete checkout in test mode.`;
+        } else if (transactionState === "PAYMENT_CANCELLED" || transactionState === "PAYMENT_FAILED") {
+          summary = `Your basket is saved. Click 'Retry Payment Checkout' on the right whenever you're ready to proceed.`;
+        } else {
+          summary = `When you're ready to buy, simply say 'Okay, I'll take it' to confirm your basket and unlock checkout.`;
+        }
+        break;
+      }
+
+      case "PAYMENT_SUCCESS": {
+        summary = `Payment verified successfully! Your order has been recorded in the database and your receipt is displayed on the right.`;
+        break;
+      }
+
+      case "PAYMENT_FAILED": {
+        summary = `The payment didn't go through, but your basket is safely retained. You can retry checkout whenever you're ready.`;
+        break;
+      }
+
+      case "PAYMENT_CANCELLED": {
+        summary = `Checkout was cancelled. Your proposed basket remains saved and ready for whenever you want to retry.`;
+        break;
+      }
+
+      case "GENERAL_FOLLOW_UP":
+      default: {
+        if (previousProduct || (tradeoffs && tradeoffs.length > 0)) {
+          let tradeText = tradeoffs && tradeoffs.length > 0 ? ` Note trade-offs: ${tradeoffs.join(" ")}` : "";
+          const prevText = previousProduct ? ` This replaces ${previousProduct.name} (₹${previousProduct.price}).` : "";
+          summary = `${recommendation.name} (₹${recommendation.price}) is selected.${prevText}${tradeText}`;
+        } else {
+          summary = `I've updated your selection with the ${recommendation.name} (₹${recommendation.price}). The basket total is ₹${basket.total}, which complies with all merchant policies.`;
+        }
+        break;
+      }
     }
   }
 
@@ -509,15 +543,19 @@ export async function classifyFollowUp(
   const systemInstruction = 
     "You are the AXIS ONE conversational follow-up classification layer.\n\n" +
     "Your job is to analyze the user's follow-up message in the context of the ongoing commerce session and classify it into exactly one of the following actions:\n" +
-    "1. NEW_SEARCH: User wants to start a fresh search for a completely different product or category (e.g. 'I want to look for headphones now').\n" +
-    "2. REMOVE_UPSELL: User explicitly rejects or wants to remove the recommended upsell/cross-sell product from the basket (e.g. 'I don't want the wrist rest', 'remove the support', 'remove it', 'drop the accessory').\n" +
-    "3. CHANGE_BUDGET: User wants to change their budget limit (e.g. 'My budget is 4000', 'under ₹3500').\n" +
-    "4. REQUEST_CHEAPER_OPTION: User wants a cheaper alternative to the currently recommended product (e.g. 'Show me something cheaper', 'is there a cheaper one?', 'cheaper', 'expensive', 'too costly').\n" +
-    "5. REQUEST_EXPLANATION: User asks for an explanation, details, reasons, comparisons, or clarifications regarding the recommendation (e.g. 'Why did you recommend this?', 'Why did you choose ClickyLite Wired?', 'Why this instead of SwiftType Travel?', 'Can you explain this recommendation?', 'Why is X better?', 'why', 'compare', 'difference', 'anything better?').\n" +
-    "6. CONFIRM_SELECTION: User confirms they want to proceed, accept, or buy the proposed basket (e.g. 'Okay, I'll take it', 'I will buy this', 'confirm', 'buy', 'yes', 'proceed', 'looks good').\n" +
-    "7. MODIFY_REQUIREMENTS: User wants to change features or criteria other than category/budget (e.g. 'Actually, wired is fine', 'I need longer battery life').\n" +
-    "8. GENERAL_FOLLOW_UP: Conversational queries, greetings ('hi', 'hello'), or payment questions ('payment', 'how to pay').\n\n" +
-    "Extract any new values mentioned (e.g. budget, wireless preference, battery priority, useCase) ONLY if relevant to the action (CHANGE_BUDGET or MODIFY_REQUIREMENTS).\n\n" +
+    "1. GREETING: Casual hello/greetings (e.g. 'hi', 'hello', 'hey').\n" +
+    "2. CONFIRM_SELECTION: User confirms they want to proceed, accept, or buy the proposed basket (e.g. 'Okay, I'll take it', 'I will buy this', 'confirm', 'buy', 'yes', 'proceed', 'looks good').\n" +
+    "3. CANCEL_SELECTION: User wants to cancel or stop the purchase flow (e.g. 'cancel', 'I changed my mind', 'nevermind').\n" +
+    "4. REMOVE_UPSELL: User explicitly rejects or wants to remove the recommended upsell/cross-sell accessory (e.g. 'I don't want the wrist rest', 'remove the support', 'remove it', 'drop the accessory').\n" +
+    "5. REMOVE_PRODUCT: User wants to remove the main product or clear cart (e.g. 'remove the keyboard', 'clear cart').\n" +
+    "6. REQUEST_CHEAPER_OPTION: User wants a cheaper alternative (e.g. 'make it cheaper', 'anything cheaper?', 'show me something cheaper', 'is there a cheaper one?', 'cheaper', 'expensive', 'too costly').\n" +
+    "7. REQUEST_ALTERNATIVE: User wants to see other alternative options (e.g. 'show me another one', 'show alternative', 'what else do you have?').\n" +
+    "8. REQUEST_EXPLANATION: User asks for an explanation, reasoning, comparison, or why it was recommended (e.g. 'Why did you recommend this?', 'Why this one?', 'Why ClickyLite instead of SwiftType?').\n" +
+    "9. CHANGE_BUDGET: User wants to change their budget limit (e.g. 'My budget is 4000', 'under ₹3500', 'make my budget 3000').\n" +
+    "10. MODIFY_REQUIREMENTS: User wants to change features (e.g. 'I prefer wired', 'I don't need wireless', 'need longer battery life').\n" +
+    "11. GENERAL_QUESTION: User asks a specific product fact question (e.g. 'Is it wireless?', 'Does it work with Mac?', 'What is the battery life?', 'how to pay?').\n" +
+    "12. NEW_SEARCH: User wants to start a fresh search for a different product or category (e.g. 'I need a wireless mouse', 'search for headphones').\n\n" +
+    "Extract any new values mentioned (e.g. budget, wireless preference, battery priority, useCase) ONLY if relevant.\n\n" +
     "Return valid structured JSON.";
 
   try {
@@ -534,14 +572,18 @@ export async function classifyFollowUp(
               type: SchemaType.STRING,
               format: "enum",
               enum: [
-                "NEW_SEARCH",
-                "REMOVE_UPSELL",
-                "CHANGE_BUDGET",
-                "REQUEST_CHEAPER_OPTION",
-                "REQUEST_EXPLANATION",
+                "GREETING",
                 "CONFIRM_SELECTION",
+                "CANCEL_SELECTION",
+                "REMOVE_UPSELL",
+                "REMOVE_PRODUCT",
+                "REQUEST_CHEAPER_OPTION",
+                "REQUEST_ALTERNATIVE",
+                "REQUEST_EXPLANATION",
+                "CHANGE_BUDGET",
                 "MODIFY_REQUIREMENTS",
-                "GENERAL_FOLLOW_UP"
+                "GENERAL_QUESTION",
+                "NEW_SEARCH"
               ],
               description: "The classified action for the user follow-up."
             },
@@ -698,11 +740,18 @@ export function classifyFollowUpFallback(
 ): { action: ConversationAction; budget?: number; wireless?: boolean; batteryPriority?: "low" | "medium" | "high"; useCase?: string } {
   const normalized = message.toLowerCase().trim();
 
-  // 1. CONFIRM_SELECTION
+  // 1. GREETING
+  if (/^(hi|hello|hey|greetings|good\s*(morning|afternoon|evening))\b/i.test(normalized) || normalized === "hi" || normalized === "hello" || normalized === "hey") {
+    return { action: "GREETING" };
+  }
+
+  // 2. CONFIRM_SELECTION
   const confirmWords = [
     "okay, i'll take it", 
     "okay i'll take it", 
-    "okay i will take it", 
+    "okay i will take it",
+    "i'll take it",
+    "ill take it",
     "take it", 
     "confirm", 
     "buy", 
@@ -720,45 +769,81 @@ export function classifyFollowUpFallback(
     return { action: "CONFIRM_SELECTION" };
   }
 
-  // 2. REMOVE_UPSELL
-  const removeWords = [
-    "remove", 
-    "dont want", 
-    "don't want", 
-    "no wrist", 
-    "no support", 
-    "without wrist", 
+  // 3. CANCEL_SELECTION
+  const cancelWords = ["cancel", "i changed my mind", "stop", "nevermind", "discard", "cancel order"];
+  if (cancelWords.some(w => normalized === w || normalized.includes(w))) {
+    return { action: "CANCEL_SELECTION" };
+  }
+
+  // 4. REMOVE_UPSELL
+  const removeUpsellWords = [
+    "remove the wrist rest", 
+    "remove wrist rest", 
+    "dont want the wrist rest",
+    "don't want the wrist rest", 
+    "no wrist rest", 
+    "without the wrist rest", 
+    "remove the support", 
     "without support", 
-    "exclude",
-    "remove it",
-    "remove the rest",
-    "remove the wrist rest",
+    "remove accessory",
     "drop the accessory",
-    "drop it"
+    "remove the optional",
+    "drop the support",
+    "drop it",
+    "remove it",
+    "remove"
   ];
-  if (removeWords.some(w => normalized === w || normalized.includes(w))) {
+  if (removeUpsellWords.some(w => normalized.includes(w))) {
     return { action: "REMOVE_UPSELL" };
   }
 
-  // 3. REQUEST_CHEAPER_OPTION
+  // 5. REMOVE_PRODUCT
+  const removeProductWords = ["remove the keyboard", "remove keyboard", "remove mouse", "clear basket", "empty basket", "clear cart"];
+  if (removeProductWords.some(w => normalized.includes(w))) {
+    return { action: "REMOVE_PRODUCT" };
+  }
+
+  // 6. REQUEST_CHEAPER_OPTION
   const cheaperWords = [
+    "make it cheaper",
+    "anything cheaper", 
+    "something cheaper",
+    "cheaper option",
     "cheaper", 
     "cheap", 
     "less price", 
     "lower price", 
-    "anything cheaper", 
-    "something cheaper",
-    "expensive",
-    "too expensive",
-    "cheapest"
+    "expensive", 
+    "too expensive", 
+    "cheapest",
+    "is there a cheaper"
   ];
-  if (cheaperWords.some(w => normalized === w || normalized.includes(w))) {
+  if (cheaperWords.some(w => normalized.includes(w))) {
     return { action: "REQUEST_CHEAPER_OPTION" };
   }
 
-  // 4. REQUEST_EXPLANATION
+  // 7. REQUEST_ALTERNATIVE
+  const alternativeWords = [
+    "show me another one",
+    "show another one",
+    "another one",
+    "show alternative",
+    "what else do you have",
+    "other options",
+    "another keyboard",
+    "another mouse",
+    "show more options",
+    "alternative"
+  ];
+  if (alternativeWords.some(w => normalized.includes(w))) {
+    return { action: "REQUEST_ALTERNATIVE" };
+  }
+
+  // 8. REQUEST_EXPLANATION / COMPARISON
   const explanationWords = [
-    "why did you", 
+    "why did you recommend", 
+    "why did you choose", 
+    "why this one", 
     "why this", 
     "explain", 
     "why", 
@@ -774,11 +859,35 @@ export function classifyFollowUpFallback(
     "anything better",
     "better option"
   ];
-  if (explanationWords.some(w => normalized === w || normalized.includes(w))) {
+  if (explanationWords.some(w => normalized.includes(w))) {
     return { action: "REQUEST_EXPLANATION" };
   }
 
-  // 5. CHANGE_BUDGET
+  // 9. PRODUCT FACT / SPEC QUESTIONS
+  const specQuestions = [
+    "is it wireless",
+    "is it wired",
+    "battery life",
+    "how long does the battery",
+    "how long does battery",
+    "bluetooth",
+    "rgb",
+    "mac",
+    "macos",
+    "apple",
+    "compatible",
+    "switches",
+    "layout",
+    "payment",
+    "how to pay",
+    "how do i pay",
+    "checkout"
+  ];
+  if (specQuestions.some(w => normalized.includes(w))) {
+    return { action: "GENERAL_QUESTION" };
+  }
+
+  // 10. CHANGE_BUDGET
   const budgetRegex = /(?:budget|limit|rs\.?|₹|inr|price|to)\s*([0-9,]+)/i;
   const budgetMatch = budgetRegex.exec(message);
   if (budgetMatch) {
@@ -788,7 +897,7 @@ export function classifyFollowUpFallback(
     }
   }
 
-  // 6. MODIFY_REQUIREMENTS
+  // 11. MODIFY_REQUIREMENTS
   let wireless: boolean | undefined;
   let batteryPriority: "low" | "medium" | "high" | undefined;
   let useCase: string | undefined;
@@ -824,8 +933,8 @@ export function classifyFollowUpFallback(
     };
   }
 
-  // 7. NEW_SEARCH
-  const searchWords = ["i need a", "i want a", "look for", "search for", "find a"];
+  // 12. NEW_SEARCH
+  const searchWords = ["i need a", "i want a", "look for", "search for", "find a", "looking for"];
   if (searchWords.some(w => normalized.includes(w))) {
     return { action: "NEW_SEARCH" };
   }

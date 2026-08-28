@@ -3,7 +3,7 @@ import { getAllOrders } from "@/lib/orders";
 
 export async function GET(request: NextRequest) {
   try {
-    const orders = getAllOrders();
+    const orders = await getAllOrders();
     return NextResponse.json({ success: true, orders });
   } catch (error: any) {
     return NextResponse.json(

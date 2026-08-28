@@ -1036,7 +1036,7 @@ export default function Home() {
             <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs space-y-6">
               <div>
                 <h3 className="text-lg font-bold text-slate-900">Persistent Order History</h3>
-                <p className="text-xs text-slate-500 mt-1">This list retrieves verified order details directly from filesystem database storage (`data/orders.json`).</p>
+                <p className="text-xs text-slate-500 mt-1">This list retrieves verified order details directly from Cloud Firestore database storage (<code className="font-mono text-[11px] bg-slate-100 px-1 py-0.5 rounded text-indigo-600">orders</code> collection).</p>
               </div>
 
               {pastOrders.length > 0 ? (
