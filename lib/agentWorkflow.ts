@@ -12,18 +12,28 @@ import {
   ConversationAction, 
   CommerceConversationContext, 
   TransactionState,
-  ResponseIntent
+  ResponseIntent,
+  MerchantComparisonSummary
 } from "./types";
-import { getAllProducts, getProductById, searchProducts } from "./catalog";
+import { getAllProducts, getProductById, searchProducts, isCategoryMatch } from "./catalog";
 import { rankProducts } from "./ranking";
 import { findUpsellOpportunity } from "./upsell";
 import { validateTransaction } from "./policy";
 import { createAuditEvent, getAuditTrail, clearAuditTrail } from "./audit";
-import { extractIntentFromMessage, generateExplanation, generateFallbackExplanation, classifyFollowUp, deriveResponseIntent } from "./gemini";
+import { 
+  extractIntentFromMessage, 
+  generateExplanation, 
+  generateFallbackExplanation, 
+  classifyFollowUp, 
+  deriveResponseIntent 
+} from "./gemini";
+import { routeConversationalMessage } from "./conversationRouter";
+import { buildMerchantComparison } from "./merchantComparison";
 import { getSession, saveSession, generateSessionId } from "./session";
 
 /**
- * Orchestrates the complete AI Buyer commerce workflow, supporting conversational sessions and follow-up requests.
+ * Orchestrates the complete multi-merchant AI Buyer commerce workflow,
+ * supporting conversational routing, ordinal references, and follow-up requests.
  */
 export async function runAgentWorkflow(
   message: string,
@@ -43,17 +53,37 @@ export async function runAgentWorkflow(
   let policyValidation: ValidationResult;
   let transactionState: TransactionState = "EXPLORING";
   let explanation: ExplanationResult;
-  let ranked: RankedResult[] = [];
+  let comparisonCandidates: RankedResult[] = [];
+  let merchantComparison: MerchantComparisonSummary | undefined;
 
   // Check if we seek the custom Apex Pro X discount test
   if (message.includes("6,999") && (message.includes("5,000") || message.includes("5000"))) {
     requestedDiscount = 1999;
   }
 
+  // Check fast conversational router first
+  const fastRoute = routeConversationalMessage(message, session);
+
   if (session) {
     // 1. Classify user message in context of active session
-    const classification = await classifyFollowUp(message, session);
-    classificationAction = classification.action;
+    let targetIndex = fastRoute.targetCandidateIndex;
+    let directMsg = fastRoute.directMessage;
+    let extractedReqs = fastRoute.extractedRequirements;
+
+    if (fastRoute.confidence >= 0.9 && fastRoute.action !== "UNKNOWN") {
+      classificationAction = fastRoute.action;
+    } else {
+      const classification = await classifyFollowUp(message, session);
+      classificationAction = classification.action;
+      targetIndex = classification.targetCandidateIndex;
+      directMsg = classification.directMessage;
+      extractedReqs = {
+        ...(classification.budget !== undefined ? { budget: classification.budget } : {}),
+        ...(classification.wireless !== undefined ? { wireless: classification.wireless } : {}),
+        ...(classification.batteryPriority ? { batteryPriority: classification.batteryPriority } : {}),
+        ...(classification.useCase ? { useCase: classification.useCase } : {})
+      };
+    }
 
     // Record follow-up received in audit logs
     createAuditEvent({
@@ -66,6 +96,21 @@ export async function runAgentWorkflow(
 
     // 2. Dispatch to action-specific handler
     if (classificationAction === "NEW_SEARCH") {
+      if (extractedReqs && extractedReqs.productCategory) {
+        return executeWorkflowWithIntent(
+          {
+            productCategory: extractedReqs.productCategory,
+            budget: extractedReqs.budget ?? session.originalIntent.budget,
+            wireless: extractedReqs.wireless ?? session.originalIntent.wireless,
+            batteryPriority: extractedReqs.batteryPriority ?? session.originalIntent.batteryPriority,
+            useCase: extractedReqs.useCase ?? session.originalIntent.useCase
+          },
+          activeSessionId!,
+          "NEW_SEARCH",
+          requestedDiscount,
+          message
+        );
+      }
       return executeNewSearch(message, activeSessionId!, requestedDiscount);
     } 
     
@@ -95,6 +140,210 @@ export async function runAgentWorkflow(
       originalTotal = basketItems.reduce((sum, p) => sum + p.price, 0);
       policyValidation = validateTransaction(basketItems, session.originalIntent.budget ?? 999999, requestedDiscount);
       transactionState = session.transactionState;
+      comparisonCandidates = session.candidatePool || [recommendation];
+      merchantComparison = session.merchantComparison;
+    }
+
+    else if (classificationAction === "THANKS" || classificationAction === "FAREWELL") {
+      const activeProd = session.recommendedProduct || getAllProducts()[0];
+      recommendation = {
+        product: activeProd,
+        matchScore: 100,
+        matchedCriteria: ["Session active"],
+        unmatchedCriteria: [],
+        reasoning: "Session retained."
+      };
+      upsell = session.currentUpsell ? {
+        recommendedProduct: session.currentUpsell,
+        originalTotal: activeProd.price,
+        upsellAmount: session.currentUpsell.price,
+        newTotal: activeProd.price + session.currentUpsell.price,
+        remainingBudget: Math.max(0, (session.originalIntent.budget ?? 0) - (activeProd.price + session.currentUpsell.price)),
+        relevanceScore: 100,
+        reasoning: "Retained from session.",
+        approved: true
+      } : null;
+      basketItems = session.currentBasket;
+      originalTotal = basketItems.reduce((sum, p) => sum + p.price, 0);
+      policyValidation = validateTransaction(basketItems, session.originalIntent.budget ?? 999999, requestedDiscount);
+      transactionState = session.transactionState;
+    }
+
+    else if (classificationAction === "CLARIFICATION_REQUIRED") {
+      const activeProd = session.recommendedProduct || getAllProducts()[0];
+      recommendation = {
+        product: activeProd,
+        matchScore: 100,
+        matchedCriteria: ["Clarification required"],
+        unmatchedCriteria: [],
+        reasoning: "Clarification requested."
+      };
+      upsell = session.currentUpsell ? {
+        recommendedProduct: session.currentUpsell,
+        originalTotal: activeProd.price,
+        upsellAmount: session.currentUpsell.price,
+        newTotal: activeProd.price + session.currentUpsell.price,
+        remainingBudget: 0,
+        relevanceScore: 100,
+        reasoning: "Retained from session.",
+        approved: true
+      } : null;
+      basketItems = session.currentBasket;
+      originalTotal = basketItems.reduce((sum, p) => sum + p.price, 0);
+      policyValidation = validateTransaction(basketItems, session.originalIntent.budget ?? 999999, requestedDiscount);
+      transactionState = session.transactionState;
+    }
+
+    else if (classificationAction === "PRODUCT_COMPARISON") {
+      const intentToUse = session.latestIntent || session.originalIntent;
+      const candidates = searchProducts(intentToUse);
+      const rankedPool = rankProducts(candidates, intentToUse);
+      comparisonCandidates = rankedPool.slice(0, 4);
+      merchantComparison = buildMerchantComparison(rankedPool, session.recommendedProduct);
+
+      recommendation = rankedPool.find(r => r.product.id === session?.recommendedProduct?.id) || rankedPool[0] || {
+        product: session.recommendedProduct || getAllProducts()[0],
+        matchScore: 100,
+        matchedCriteria: [],
+        unmatchedCriteria: [],
+        reasoning: "Current active selection."
+      };
+
+      upsell = session.currentUpsell ? {
+        recommendedProduct: session.currentUpsell,
+        originalTotal: recommendation.product.price,
+        upsellAmount: session.currentUpsell.price,
+        newTotal: recommendation.product.price + session.currentUpsell.price,
+        remainingBudget: Math.max(0, (intentToUse.budget ?? 0) - (recommendation.product.price + session.currentUpsell.price)),
+        relevanceScore: 100,
+        reasoning: "Retained from session.",
+        approved: true
+      } : null;
+
+      basketItems = session.currentBasket;
+      originalTotal = basketItems.reduce((sum, p) => sum + p.price, 0);
+      policyValidation = validateTransaction(basketItems, intentToUse.budget ?? 999999, requestedDiscount);
+      transactionState = session.transactionState;
+
+      createAuditEvent({
+        eventType: "MERCHANT_COMPARED",
+        actor: "AXIS_ONE",
+        status: "SUCCESS",
+        summary: `Multi-merchant comparison executed across ${merchantComparison.merchantCount} merchants.`,
+        details: { merchantCount: merchantComparison.merchantCount, candidateCount: merchantComparison.candidateCount }
+      });
+    }
+
+    else if (classificationAction === "CONFIRM_REFERENCED_PRODUCT") {
+      const intentToUse = session.latestIntent || session.originalIntent;
+      let targetProduct: Product | undefined;
+
+      if (targetIndex !== undefined && session.candidatePool && session.candidatePool[targetIndex]) {
+        targetProduct = session.candidatePool[targetIndex].product;
+      } else if (session.candidatePool && session.candidatePool.length > 0) {
+        targetProduct = session.candidatePool[0].product;
+      } else {
+        const candidates = searchProducts(intentToUse);
+        const rankedPool = rankProducts(candidates, intentToUse);
+        targetProduct = rankedPool[targetIndex || 0]?.product || session.recommendedProduct;
+      }
+
+      if (targetProduct) {
+        recommendation = {
+          product: targetProduct,
+          matchScore: 100,
+          matchedCriteria: ["Selected via user reference"],
+          unmatchedCriteria: [],
+          reasoning: `Selected ${targetProduct.name} from ${targetProduct.merchantName}.`
+        };
+
+        const budgetLimit = intentToUse.budget ?? 999999;
+        upsell = findUpsellOpportunity(targetProduct, getAllProducts(), budgetLimit, intentToUse);
+        basketItems = [targetProduct];
+        if (upsell) {
+          basketItems.push(upsell.recommendedProduct);
+        }
+        originalTotal = targetProduct.price + (upsell ? upsell.recommendedProduct.price : 0);
+        policyValidation = validateTransaction(basketItems, budgetLimit, requestedDiscount);
+        transactionState = policyValidation.approved ? "AWAITING_USER_APPROVAL" : "BLOCKED";
+      } else {
+        return executeNewSearch(message, activeSessionId!, requestedDiscount);
+      }
+    }
+
+    else if (classificationAction === "KEEP_CURRENT_SELECTION") {
+      if (!session.recommendedProduct) {
+        return executeNewSearch(message, activeSessionId!, requestedDiscount);
+      }
+
+      recommendation = {
+        product: session.recommendedProduct,
+        matchScore: 100,
+        matchedCriteria: ["Retained current selection"],
+        unmatchedCriteria: [],
+        reasoning: "Retained current selection."
+      };
+      upsell = session.currentUpsell ? {
+        recommendedProduct: session.currentUpsell,
+        originalTotal: session.recommendedProduct.price,
+        upsellAmount: session.currentUpsell.price,
+        newTotal: session.recommendedProduct.price + session.currentUpsell.price,
+        remainingBudget: Math.max(0, (session.originalIntent.budget ?? 0) - (session.recommendedProduct.price + session.currentUpsell.price)),
+        relevanceScore: 100,
+        reasoning: "Retained from session.",
+        approved: true
+      } : null;
+      basketItems = session.currentBasket;
+      originalTotal = basketItems.reduce((sum, p) => sum + p.price, 0);
+      policyValidation = validateTransaction(basketItems, session.originalIntent.budget ?? 999999, requestedDiscount);
+      transactionState = session.transactionState;
+    }
+
+    else if (classificationAction === "ADD_UPSELL") {
+      if (!session.recommendedProduct) {
+        return handleEarlyFailure("POLICY_VALIDATION", "No recommended product in session context to add upsell to.", activeSessionId!, classificationAction);
+      }
+
+      const intentToUse = session.latestIntent || session.originalIntent;
+      const budgetLimit = intentToUse.budget ?? 999999;
+      
+      const foundUpsell = session.currentUpsell 
+        ? {
+            recommendedProduct: session.currentUpsell,
+            originalTotal: session.recommendedProduct.price,
+            upsellAmount: session.currentUpsell.price,
+            newTotal: session.recommendedProduct.price + session.currentUpsell.price,
+            remainingBudget: Math.max(0, budgetLimit - (session.recommendedProduct.price + session.currentUpsell.price)),
+            relevanceScore: 100,
+            reasoning: "Added accessory to basket.",
+            approved: true
+          }
+        : findUpsellOpportunity(session.recommendedProduct, getAllProducts(), budgetLimit, intentToUse);
+
+      upsell = foundUpsell;
+      recommendation = {
+        product: session.recommendedProduct,
+        matchScore: 100,
+        matchedCriteria: ["Main product retained with accessory added"],
+        unmatchedCriteria: [],
+        reasoning: "Added accessory."
+      };
+
+      basketItems = [session.recommendedProduct];
+      if (upsell) {
+        basketItems.push(upsell.recommendedProduct);
+      }
+      originalTotal = recommendation.product.price + (upsell ? upsell.recommendedProduct.price : 0);
+      policyValidation = validateTransaction(basketItems, budgetLimit, requestedDiscount);
+      transactionState = policyValidation.approved ? "AWAITING_USER_APPROVAL" : "BLOCKED";
+
+      createAuditEvent({
+        eventType: "UPSELL_IDENTIFIED",
+        actor: "AXIS_ONE",
+        status: "SUCCESS",
+        summary: `Added accessory to basket: ${upsell?.recommendedProduct.name || "Accessory"}.`,
+        details: { basketItems: basketItems.map(p => p.name), finalAmount: policyValidation.finalAmount }
+      });
     }
 
     else if (classificationAction === "REMOVE_UPSELL") {
@@ -142,7 +391,7 @@ export async function runAgentWorkflow(
     
     else if (classificationAction === "CHANGE_BUDGET") {
       const currentIntent = session.latestIntent || session.originalIntent;
-      const newBudget = classification.budget ?? currentIntent.budget ?? 999999;
+      const newBudget = extractedReqs?.budget ?? currentIntent.budget ?? 999999;
       const updatedIntent = {
         ...currentIntent,
         budget: newBudget
@@ -161,83 +410,66 @@ export async function runAgentWorkflow(
       const intentToUse = session.latestIntent || session.originalIntent;
 
       const cheaperCandidates = getAllProducts().filter(p => 
-        p.category.toLowerCase() === category.toLowerCase() &&
+        (isCategoryMatch(p.category, category) || isCategoryMatch(p.category, intentToUse.productCategory)) &&
         p.price < currentPrice &&
-        p.stock >= 1
+        (p.stock >= 1 || (p.inventory ?? 0) >= 1)
       );
 
       if (cheaperCandidates.length === 0) {
-        const failContext: ExplanationContext = {
-          intent: intentToUse,
-          recommendation: {
-            name: session.recommendedProduct.name,
-            price: session.recommendedProduct.price,
-            matchScore: 100,
-            matchedCriteria: [],
-            unmatchedCriteria: []
-          },
-          upsell: session.currentUpsell ? {
-            name: session.currentUpsell.name,
-            price: session.currentUpsell.price,
-            relevanceReason: ""
-          } : null,
-          basket: {
-            total: session.currentBasket.reduce((sum, p) => sum + p.price, 0),
-            remainingBudget: Math.max(0, (intentToUse.budget ?? 0) - session.currentBasket.reduce((sum, p) => sum + p.price, 0))
-          },
-          policyValidation: {
-            approved: false,
-            checks: []
-          }
+        recommendation = {
+          product: session.recommendedProduct,
+          matchScore: 100,
+          matchedCriteria: ["Lowest price in catalog"],
+          unmatchedCriteria: [],
+          reasoning: `${session.recommendedProduct.name} is already the lowest priced option in our catalog at ₹${currentPrice}.`
         };
-        const explanationResult = generateFallbackExplanation(failContext);
+
+        upsell = session.currentUpsell ? {
+          recommendedProduct: session.currentUpsell,
+          originalTotal: session.recommendedProduct.price,
+          upsellAmount: session.currentUpsell.price,
+          newTotal: session.recommendedProduct.price + session.currentUpsell.price,
+          remainingBudget: Math.max(0, (intentToUse.budget ?? 0) - (session.recommendedProduct.price + session.currentUpsell.price)),
+          relevanceScore: 100,
+          reasoning: "Retained accessory.",
+          approved: true
+        } : null;
+
+        basketItems = session.currentBasket;
+        originalTotal = basketItems.reduce((sum, p) => sum + p.price, 0);
+        policyValidation = validateTransaction(basketItems, intentToUse.budget ?? 999999, requestedDiscount);
+        transactionState = session.transactionState;
 
         createAuditEvent({
-          eventType: "ACTION_BLOCKED",
+          eventType: "EXPLANATION_GENERATED",
           actor: "AXIS_ONE",
-          status: "BLOCKED",
-          summary: "No cheaper alternative products found in catalog.",
-          details: { category, maxPrice: currentPrice }
+          status: "SUCCESS",
+          summary: "Current selection is already the lowest-priced option in catalog.",
+          details: { category, currentPrice }
         });
+      } else {
+        const rankedCheaper = rankProducts(cheaperCandidates, intentToUse);
+        recommendation = rankedCheaper[0];
+        
+        const budgetLimit = intentToUse.budget ?? 999999;
+        upsell = findUpsellOpportunity(recommendation.product, getAllProducts(), budgetLimit, intentToUse);
+        
+        basketItems = [recommendation.product];
+        if (upsell) {
+          basketItems.push(upsell.recommendedProduct);
+        }
+        originalTotal = recommendation.product.price + (upsell ? upsell.recommendedProduct.price : 0);
+        policyValidation = validateTransaction(basketItems, budgetLimit, requestedDiscount);
+        transactionState = policyValidation.approved ? "AWAITING_USER_APPROVAL" : "BLOCKED";
 
-        return {
-          success: false,
-          stage: "POLICY_VALIDATION",
-          message: `No cheaper alternatives than ${session.recommendedProduct.name} are available in stock.`,
-          alternatives: [],
-          auditTrail: getAuditTrail(),
-          explanation: {
-            ...explanationResult,
-            policyExplanation: "No cheaper alternatives could be recommended under merchant stock rules.",
-            source: "FALLBACK"
-          },
-          sessionId: activeSessionId!,
-          conversationAction: classificationAction,
-          transactionState: "BLOCKED"
-        };
+        createAuditEvent({
+          eventType: "POLICY_VALIDATED",
+          actor: "POLICY_ENGINE",
+          status: policyValidation.approved ? "SUCCESS" : "FAILED",
+          summary: `Cheaper option selected: ${recommendation.product.name} from ${recommendation.product.merchantName}. Policy check: ${policyValidation.approved ? "PASSED" : "FAILED"}`,
+          details: { basketItems: basketItems.map(p => p.name), finalAmount: policyValidation.finalAmount }
+        });
       }
-
-      const rankedCheaper = rankProducts(cheaperCandidates, intentToUse);
-      recommendation = rankedCheaper[0];
-      
-      const budgetLimit = intentToUse.budget ?? 999999;
-      upsell = findUpsellOpportunity(recommendation.product, getAllProducts(), budgetLimit, intentToUse);
-      
-      basketItems = [recommendation.product];
-      if (upsell) {
-        basketItems.push(upsell.recommendedProduct);
-      }
-      originalTotal = recommendation.product.price + (upsell ? upsell.recommendedProduct.price : 0);
-      policyValidation = validateTransaction(basketItems, budgetLimit, requestedDiscount);
-      transactionState = policyValidation.approved ? "AWAITING_USER_APPROVAL" : "BLOCKED";
-
-      createAuditEvent({
-        eventType: "POLICY_VALIDATED",
-        actor: "POLICY_ENGINE",
-        status: policyValidation.approved ? "SUCCESS" : "FAILED",
-        summary: `Cheaper option selected: ${recommendation.product.name}. Policy check: ${policyValidation.approved ? "PASSED" : "FAILED"}`,
-        details: { basketItems: basketItems.map(p => p.name), finalAmount: policyValidation.finalAmount }
-      });
     }
 
     else if (classificationAction === "REQUEST_ALTERNATIVE") {
@@ -253,7 +485,7 @@ export async function runAgentWorkflow(
       const altCandidates = getAllProducts().filter(p =>
         p.category.toLowerCase() === category.toLowerCase() &&
         p.id !== currentId &&
-        p.stock >= 1 &&
+        (p.stock >= 1 || (p.inventory ?? 0) >= 1) &&
         p.price <= budgetLimit
       );
 
@@ -277,10 +509,10 @@ export async function runAgentWorkflow(
       const intentToUpdate = session.latestIntent || session.originalIntent;
       const updatedIntent = {
         ...intentToUpdate,
-        ...(classification.wireless !== undefined ? { wireless: classification.wireless } : {}),
-        ...(classification.batteryPriority ? { batteryPriority: classification.batteryPriority } : {}),
-        ...(classification.useCase ? { useCase: classification.useCase } : {}),
-        ...(classification.budget !== undefined ? { budget: classification.budget } : {})
+        ...(extractedReqs?.wireless !== undefined ? { wireless: extractedReqs.wireless } : {}),
+        ...(extractedReqs?.batteryPriority ? { batteryPriority: extractedReqs.batteryPriority } : {}),
+        ...(extractedReqs?.useCase ? { useCase: extractedReqs.useCase } : {}),
+        ...(extractedReqs?.budget !== undefined ? { budget: extractedReqs.budget } : {})
       };
 
       return executeWorkflowWithIntent(updatedIntent, activeSessionId!, classificationAction, requestedDiscount, message);
@@ -359,6 +591,30 @@ export async function runAgentWorkflow(
         }
       });
     } 
+    
+    else if (classificationAction === "PAYMENT_GUIDANCE") {
+      recommendation = {
+        product: session.recommendedProduct || getAllProducts()[0],
+        matchScore: 100,
+        matchedCriteria: ["Payment Guidance"],
+        unmatchedCriteria: [],
+        reasoning: "Payment guidance requested."
+      };
+      upsell = session.currentUpsell ? {
+        recommendedProduct: session.currentUpsell,
+        originalTotal: recommendation.product.price,
+        upsellAmount: session.currentUpsell.price,
+        newTotal: recommendation.product.price + session.currentUpsell.price,
+        remainingBudget: 0,
+        relevanceScore: 100,
+        reasoning: "Retained from session.",
+        approved: true
+      } : null;
+      basketItems = session.currentBasket;
+      originalTotal = basketItems.reduce((sum, p) => sum + p.price, 0);
+      policyValidation = validateTransaction(basketItems, session.originalIntent.budget ?? 999999, requestedDiscount);
+      transactionState = session.transactionState;
+    }
 
     else if (classificationAction === "CANCEL_SELECTION") {
       recommendation = {
@@ -421,17 +677,22 @@ export async function runAgentWorkflow(
       latestRequirements: session.latestIntent || session.originalIntent,
       recommendation: {
         name: recommendation.product.name,
+        merchantName: recommendation.product.merchantName,
         price: recommendation.product.price,
         matchScore: recommendation.matchScore,
         matchedCriteria: recommendation.matchedCriteria,
-        unmatchedCriteria: recommendation.unmatchedCriteria
+        unmatchedCriteria: recommendation.unmatchedCriteria,
+        warranty: recommendation.product.warranty,
+        deliveryEstimate: recommendation.product.deliveryEstimate
       },
       previousProduct: session.previousProduct ? {
         name: session.previousProduct.name,
+        merchantName: session.previousProduct.merchantName,
         price: session.previousProduct.price
       } : null,
       upsell: upsell ? {
         name: upsell.recommendedProduct.name,
+        merchantName: upsell.recommendedProduct.merchantName,
         price: upsell.recommendedProduct.price,
         relevanceReason: upsell.reasoning
       } : null,
@@ -448,21 +709,33 @@ export async function runAgentWorkflow(
       action: classificationAction,
       transactionState,
       responseIntent: derivedIntent,
-      recentMessages: session.recentMessages
+      recentMessages: session.recentMessages,
+      merchantComparison
     };
 
-    try {
-      const geminiExplanation = await generateExplanation(explanationContext);
+    if (directMsg) {
       explanation = {
-        ...geminiExplanation,
-        source: "GEMINI"
-      };
-    } catch (error) {
-      const fallback = generateFallbackExplanation(explanationContext);
-      explanation = {
-        ...fallback,
+        recommendationExplanation: directMsg,
+        upsellExplanation: upsell ? upsell.reasoning : "",
+        budgetExplanation: "",
+        policyExplanation: "Verified under merchant policy rules.",
+        summary: directMsg,
         source: "FALLBACK"
       };
+    } else {
+      try {
+        const geminiExplanation = await generateExplanation(explanationContext);
+        explanation = {
+          ...geminiExplanation,
+          source: "GEMINI"
+        };
+      } catch (error) {
+        const fallback = generateFallbackExplanation(explanationContext);
+        explanation = {
+          ...fallback,
+          source: "FALLBACK"
+        };
+      }
     }
 
     createAuditEvent({
@@ -490,6 +763,8 @@ export async function runAgentWorkflow(
     session.lastAction = classificationAction;
     session.lastUserQuery = message;
     session.tradeoffs = explanationContext.tradeoffs;
+    session.candidatePool = comparisonCandidates.length > 0 ? comparisonCandidates : session.candidatePool;
+    session.merchantComparison = merchantComparison || session.merchantComparison;
     saveSession(session);
 
     return {
@@ -497,6 +772,8 @@ export async function runAgentWorkflow(
       message: explanation.summary,
       intent: session.latestIntent || session.originalIntent,
       recommendation,
+      comparisonCandidates: comparisonCandidates.length > 0 ? comparisonCandidates : session.candidatePool,
+      merchantComparison: merchantComparison || session.merchantComparison,
       upsell,
       basket: {
         items: basketItems,
@@ -515,6 +792,80 @@ export async function runAgentWorkflow(
   } else {
     // Start fresh workflow
     activeSessionId = generateSessionId();
+
+    // Check fast router on new session without history
+    if (fastRoute.action === "GREETING" || fastRoute.action === "THANKS" || fastRoute.action === "FAREWELL" || fastRoute.action === "CLARIFICATION_REQUIRED") {
+      const dummyProd = getAllProducts()[0];
+      const defaultRec: RankedResult = {
+        product: dummyProd,
+        matchScore: 100,
+        matchedCriteria: ["General Welcome"],
+        unmatchedCriteria: [],
+        reasoning: "Ready for shopping request."
+      };
+      const defaultValidation: ValidationResult = {
+        approved: true,
+        originalTotal: 0,
+        requestedDiscount: 0,
+        finalAmount: 0,
+        checks: [],
+        failureReasons: []
+      };
+
+      const directText = fastRoute.directMessage || "Hey! I'm AXIS ONE. Tell me what you're looking for and your budget, and I'll find the best validated options across our verified merchants.";
+
+      const newSession: CommerceConversationContext = {
+        sessionId: activeSessionId,
+        originalIntent: { productCategory: "Mechanical Keyboard" },
+        latestIntent: { productCategory: "Mechanical Keyboard" },
+        currentBasket: [],
+        transactionState: "EXPLORING",
+        recentMessages: [
+          { role: "USER", content: message },
+          { role: "AXIS_ONE", content: directText }
+        ],
+        lastAction: fastRoute.action,
+        lastUserQuery: message
+      };
+      saveSession(newSession);
+
+      return {
+        success: true,
+        message: directText,
+        intent: { productCategory: "Mechanical Keyboard" },
+        recommendation: defaultRec,
+        upsell: null,
+        basket: { items: [], originalTotal: 0, requestedDiscount: 0, finalAmount: 0 },
+        policyValidation: defaultValidation,
+        transactionState: "EXPLORING",
+        auditTrail: getAuditTrail(),
+        explanation: {
+          recommendationExplanation: directText,
+          upsellExplanation: "",
+          budgetExplanation: "",
+          policyExplanation: "",
+          summary: directText,
+          source: "FALLBACK"
+        },
+        sessionId: activeSessionId,
+        conversationAction: fastRoute.action
+      };
+    }
+
+    if (fastRoute.action === "NEW_SEARCH" && fastRoute.extractedRequirements?.productCategory) {
+      return executeWorkflowWithIntent(
+        {
+          productCategory: fastRoute.extractedRequirements.productCategory,
+          ...(fastRoute.extractedRequirements.budget ? { budget: fastRoute.extractedRequirements.budget } : {}),
+          ...(fastRoute.extractedRequirements.wireless !== undefined ? { wireless: fastRoute.extractedRequirements.wireless } : {})
+        },
+        activeSessionId,
+        "NEW_SEARCH",
+        requestedDiscount,
+        message
+      );
+    }
+
     return executeNewSearch(message, activeSessionId, requestedDiscount);
   }
 }
@@ -553,7 +904,6 @@ async function executeNewSearch(
       details: { error: error.message }
     });
 
-    // Provide a basic fallback explanation context
     const failContext: ExplanationContext = {
       intent: { productCategory: "N/A" },
       recommendation: { name: "N/A", price: 0, matchScore: 0, matchedCriteria: [], unmatchedCriteria: [] },
@@ -598,8 +948,8 @@ async function executeWorkflowWithIntent(
     eventType: "CATALOG_SEARCHED",
     actor: "AXIS_ONE",
     status: "SUCCESS",
-    summary: "Merchant catalog searched for matching products.",
-    details: { candidateCount: candidates.length }
+    summary: "Multi-merchant catalog searched for matching products.",
+    details: { candidateCount: candidates.length, requestedCategory: intent.productCategory }
   });
 
   if (candidates.length === 0) {
@@ -615,12 +965,12 @@ async function executeWorkflowWithIntent(
     return {
       success: false,
       stage: "CATALOG_SEARCH",
-      message: "No suitable products were found for your request.",
+      message: "No suitable products were found for your request across our verified merchants.",
       alternatives: [],
       auditTrail: getAuditTrail(),
       explanation: {
         ...explanationFallback,
-        summary: "No suitable products were found in Nexora Tech catalog matching your criteria.",
+        summary: "No suitable products were found across our merchants matching your criteria.",
         source: "FALLBACK"
       },
       sessionId,
@@ -634,9 +984,10 @@ async function executeWorkflowWithIntent(
     eventType: "PRODUCTS_RANKED",
     actor: "AXIS_ONE",
     status: "SUCCESS",
-    summary: "Product candidates ranked deterministically.",
+    summary: "Product candidates ranked deterministically across merchants.",
     details: {
       topRecommendation: ranked[0]?.product.name || "None",
+      topMerchant: ranked[0]?.product.merchantName || "None",
       rankedResultsCount: ranked.length
     }
   });
@@ -646,13 +997,17 @@ async function executeWorkflowWithIntent(
     eventType: "PRODUCT_SELECTED",
     actor: "AXIS_ONE",
     status: "SUCCESS",
-    summary: `Selected top recommendation: ${recommendation.product.name}.`,
+    summary: `Selected top recommendation: ${recommendation.product.name} from ${recommendation.product.merchantName}.`,
     details: {
       productId: recommendation.product.id,
       productName: recommendation.product.name,
+      merchantId: recommendation.product.merchantId,
+      merchantName: recommendation.product.merchantName,
       price: recommendation.product.price
     }
   });
+
+  const merchantComparison = buildMerchantComparison(ranked, recommendation.product);
 
   const budgetLimit = intent.budget ?? 999999;
   const upsell = findUpsellOpportunity(recommendation.product, getAllProducts(), budgetLimit, intent);
@@ -661,9 +1016,10 @@ async function executeWorkflowWithIntent(
       eventType: "UPSELL_IDENTIFIED",
       actor: "AXIS_ONE",
       status: "SUCCESS",
-      summary: "Relevant cross-sell opportunity identified.",
+      summary: `Relevant cross-sell opportunity identified: ${upsell.recommendedProduct.name} from ${upsell.recommendedProduct.merchantName}.`,
       details: {
         recommendedProduct: upsell.recommendedProduct.name,
+        merchantName: upsell.recommendedProduct.merchantName,
         upsellAmount: upsell.upsellAmount,
         newBasketTotal: upsell.newTotal
       }
@@ -739,17 +1095,22 @@ async function executeWorkflowWithIntent(
     latestRequirements: intent,
     recommendation: {
       name: recommendation.product.name,
+      merchantName: recommendation.product.merchantName,
       price: recommendation.product.price,
       matchScore: recommendation.matchScore,
       matchedCriteria: recommendation.matchedCriteria,
-      unmatchedCriteria: recommendation.unmatchedCriteria
+      unmatchedCriteria: recommendation.unmatchedCriteria,
+      warranty: recommendation.product.warranty,
+      deliveryEstimate: recommendation.product.deliveryEstimate
     },
     previousProduct: previousProduct ? {
       name: previousProduct.name,
+      merchantName: previousProduct.merchantName,
       price: previousProduct.price
     } : null,
     upsell: upsell ? {
       name: upsell.recommendedProduct.name,
+      merchantName: upsell.recommendedProduct.merchantName,
       price: upsell.recommendedProduct.price,
       relevanceReason: upsell.reasoning
     } : null,
@@ -766,7 +1127,8 @@ async function executeWorkflowWithIntent(
     action: conversationAction,
     transactionState,
     responseIntent: derivedIntent,
-    recentMessages: existingSession?.recentMessages
+    recentMessages: existingSession?.recentMessages,
+    merchantComparison
   };
 
   let explanation: ExplanationResult;
@@ -810,7 +1172,9 @@ async function executeWorkflowWithIntent(
     previousProduct: previousProduct || null,
     lastAction: conversationAction,
     lastUserQuery: userMessage,
-    tradeoffs: explanationContext.tradeoffs
+    tradeoffs: explanationContext.tradeoffs,
+    candidatePool: ranked,
+    merchantComparison
   } : {
     sessionId,
     originalIntent: intent,
@@ -832,7 +1196,9 @@ async function executeWorkflowWithIntent(
     previousProduct: previousProduct || null,
     lastAction: conversationAction,
     lastUserQuery: userMessage,
-    tradeoffs: explanationContext.tradeoffs
+    tradeoffs: explanationContext.tradeoffs,
+    candidatePool: ranked,
+    merchantComparison
   };
 
   if (userMessage) {
@@ -848,6 +1214,8 @@ async function executeWorkflowWithIntent(
       message: explanation.summary,
       intent,
       recommendation,
+      comparisonCandidates: ranked.slice(0, 4),
+      merchantComparison,
       upsell,
       basket: {
         items: basketItems,
@@ -869,6 +1237,7 @@ async function executeWorkflowWithIntent(
       message: "The proposed purchase could not be approved under merchant policies.",
       policyValidation,
       alternatives: ranked.slice(1),
+      merchantComparison,
       auditTrail: getAuditTrail(),
       explanation,
       sessionId,
@@ -905,6 +1274,9 @@ function handleEarlyFailure(
 function calculateTradeoffs(originalIntent: UserIntent, product: Product): string[] {
   const tradeoffs: string[] = [];
   const isWireless = product.tags.includes("wireless") || 
+                     product.connectivity === "wireless" ||
+                     product.connectivity === "dual-mode" ||
+                     product.connectivity === "tri-mode" ||
                      product.features.some(f => f.toLowerCase().includes("wireless"));
   if (originalIntent.wireless === true && !isWireless) {
     tradeoffs.push("The recommended product is wired, whereas you preferred a wireless option.");

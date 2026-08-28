@@ -2,14 +2,54 @@
  * Core type definitions for the AXIS ONE commerce engine.
  */
 
+export interface MerchantPolicyRules {
+  freeShippingThreshold: number; // INR amount above which shipping is free
+  returnWindowDays: number; // Number of days allowed for returns
+  standardWarrantyMonths: number; // Standard warranty duration
+  maxDiscountPercentage?: number; // Maximum allowed promotional discount %
+  allowsBundleDiscounts?: boolean;
+}
+
+export interface Merchant {
+  merchantId: string;
+  merchantName: string;
+  description: string;
+  categories: string[];
+  policyRules: MerchantPolicyRules;
+  shippingPolicy: string;
+  returnPolicy: string;
+  discountPolicy: string;
+  inventoryPolicy: string;
+  rating: number; // e.g. 4.8
+}
+
+export interface ProductPolicyFlags {
+  freeShipping: boolean;
+  returnDays: number;
+  bundleEligible?: boolean;
+  codAvailable?: boolean;
+}
+
 export interface Product {
   id: string;
+  merchantId?: string;
+  merchantName?: string;
   name: string;
   category: string;
+  subcategory?: string;
   price: number; // Integer representing price in INR (e.g. 4499)
-  stock: number; // Integer representing stock count
+  currency?: string;
+  stock: number; // Integer representing stock count (backwards compatible alias for inventory)
+  inventory?: number; // Integer representing stock count
   description: string;
   features: string[];
+  connectivity?: "wireless" | "wired" | "bluetooth" | "dual-mode" | "tri-mode" | "usb-c" | "none";
+  compatibility?: string[]; // e.g. ["Windows", "macOS", "Linux"]
+  useCases?: string[]; // e.g. ["programming", "gaming", "office", "travel"]
+  rating?: number; // e.g. 4.7
+  deliveryEstimate?: string; // e.g. "2-3 business days"
+  warranty?: string; // e.g. "1 Year Merchant Warranty"
+  policyFlags?: ProductPolicyFlags;
   tags: string[];
   image: string; // URL placeholder or local asset path
   batteryLife: string | null; // e.g. "80 hours" or null if not applicable
@@ -27,6 +67,7 @@ export type AuditEventType =
   | 'CATALOG_SEARCHED'
   | 'PRODUCTS_RANKED'
   | 'PRODUCT_SELECTED'
+  | 'MERCHANT_COMPARED'
   | 'UPSELL_IDENTIFIED'
   | 'POLICY_VALIDATED'
   | 'USER_APPROVED'
@@ -44,7 +85,6 @@ export interface AuditEvent {
   summary: string;
   details: Record<string, any>;
 }
-
 
 export interface PolicyCheck {
   rule: string;
@@ -69,6 +109,7 @@ export interface UserIntent {
   wireless?: boolean;
   batteryPriority?: "low" | "medium" | "high";
   useCase?: string;
+  preferredMerchantId?: string;
 }
 
 export interface RankedResult {
@@ -77,6 +118,17 @@ export interface RankedResult {
   matchedCriteria: string[];
   unmatchedCriteria: string[];
   reasoning: string;
+  merchantComparisonBadge?: string;
+}
+
+export interface MerchantComparisonSummary {
+  candidateCount: number;
+  merchantCount: number;
+  cheapestOption?: { product: Product; merchantName: string; price: number };
+  bestWarrantyOption?: { product: Product; merchantName: string; warranty: string };
+  bestMatchOption?: { product: Product; merchantName: string; matchScore: number };
+  comparisonHighlights: string[];
+  comparisonText: string;
 }
 
 export interface UpsellOpportunity {
@@ -102,17 +154,22 @@ export interface ExplanationContext {
   latestRequirements?: UserIntent;
   recommendation: {
     name: string;
+    merchantName?: string;
     price: number;
     matchScore: number;
     matchedCriteria: string[];
     unmatchedCriteria: string[];
+    warranty?: string;
+    deliveryEstimate?: string;
   };
   previousProduct?: {
     name: string;
+    merchantName?: string;
     price: number;
   } | null;
   upsell: {
     name: string;
+    merchantName?: string;
     price: number;
     relevanceReason: string;
   } | null;
@@ -130,6 +187,8 @@ export interface ExplanationContext {
   transactionState?: TransactionState;
   responseIntent?: ResponseIntent;
   recentMessages?: Array<{ role: "USER" | "AXIS_ONE"; content: string }>;
+  merchantComparison?: MerchantComparisonSummary;
+  alternativeCandidates?: RankedResult[];
 }
 
 export type ResponseIntent =
@@ -142,20 +201,15 @@ export type ResponseIntent =
   | "REQUEST_EXPLANATION"
   | "PRODUCT_COMPARISON"
   | "CONFIRMATION"
+  | "KEEP_CURRENT_SELECTION"
   | "PAYMENT_GUIDANCE"
   | "PAYMENT_SUCCESS"
   | "PAYMENT_FAILED"
   | "PAYMENT_CANCELLED"
+  | "CLARIFICATION_REQUIRED"
+  | "THANKS"
+  | "FAREWELL"
   | "GENERAL_FOLLOW_UP";
-
-export interface ExplanationResult {
-  recommendationExplanation: string;
-  upsellExplanation: string;
-  budgetExplanation: string;
-  policyExplanation: string;
-  summary: string;
-  source: "GEMINI" | "FALLBACK";
-}
 
 export type ConversationAction =
   | "NEW_SEARCH"
@@ -166,11 +220,19 @@ export type ConversationAction =
   | "REQUEST_CHEAPER_OPTION"
   | "REQUEST_ALTERNATIVE"
   | "REQUEST_EXPLANATION"
+  | "PRODUCT_COMPARISON"
   | "CHANGE_REQUIREMENT"
   | "MODIFY_REQUIREMENTS"
   | "CONFIRM_SELECTION"
+  | "CONFIRM_REFERENCED_PRODUCT"
+  | "KEEP_CURRENT_SELECTION"
+  | "ADD_UPSELL"
+  | "PAYMENT_GUIDANCE"
   | "CANCEL_SELECTION"
   | "GREETING"
+  | "THANKS"
+  | "FAREWELL"
+  | "CLARIFICATION_REQUIRED"
   | "GENERAL_QUESTION"
   | "GENERAL_FOLLOW_UP"
   | "UNKNOWN";
@@ -204,6 +266,17 @@ export interface PersistentOrder {
   auditHistory: AuditEvent[];
 }
 
+export interface RouterResult {
+  action: ConversationAction;
+  confidence: number;
+  targetProductId?: string;
+  targetCandidateIndex?: number;
+  extractedRequirements?: Partial<UserIntent>;
+  clarificationPrompt?: string;
+  directMessage?: string;
+  reasoning?: string;
+}
+
 export interface CommerceConversationContext {
   sessionId: string;
   originalIntent: UserIntent;
@@ -221,8 +294,11 @@ export interface CommerceConversationContext {
   upsells?: Product[];
   currentBasket: Product[];
   previousBasket?: Product[];
+  candidatePool?: RankedResult[];
+  merchantComparison?: MerchantComparisonSummary;
   policyStatus?: boolean;
   transactionState: TransactionState;
+  pendingAction?: "CONFIRM_CHECKOUT" | "ADD_UPSELL_PROMPT" | "CHEAPER_ALTERNATIVE_PROMPT" | "CLARIFY_REQUIREMENTS" | null;
   recentMessages: Array<{
     role: "USER" | "AXIS_ONE";
     content: string;
@@ -245,6 +321,8 @@ export interface WorkflowSuccessResponse {
   message: string;
   intent: UserIntent;
   recommendation: RankedResult;
+  comparisonCandidates?: RankedResult[];
+  merchantComparison?: MerchantComparisonSummary;
   upsell: UpsellOpportunity | null;
   basket: {
     items: Product[];
@@ -266,12 +344,24 @@ export interface WorkflowFailureResponse {
   message: string;
   policyValidation?: ValidationResult;
   alternatives: RankedResult[];
+  merchantComparison?: MerchantComparisonSummary;
   auditTrail: AuditEvent[];
   explanation?: ExplanationResult;
   sessionId: string;
   conversationAction: ConversationAction;
   transactionState: TransactionState;
 }
+
+export interface ExplanationResult {
+  recommendationExplanation: string;
+  upsellExplanation: string;
+  budgetExplanation: string;
+  policyExplanation: string;
+  summary: string;
+  merchantComparisonExplanation?: string;
+  source: "GEMINI" | "FALLBACK";
+}
+
 
 
 

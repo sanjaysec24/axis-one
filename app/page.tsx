@@ -730,7 +730,14 @@ export default function Home() {
                         <CategoryIcon category={workflowResponse.recommendation.product.category} />
                       </div>
                       <div>
-                        <h4 className="text-sm font-extrabold text-slate-900">{workflowResponse.recommendation.product.name}</h4>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-sm font-extrabold text-slate-900">{workflowResponse.recommendation.product.name}</h4>
+                          {workflowResponse.recommendation.product.merchantName && (
+                            <span className="text-[10px] font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200">
+                              🏬 {workflowResponse.recommendation.product.merchantName}
+                            </span>
+                          )}
+                        </div>
                         <span className="text-[10px] font-semibold text-indigo-500 tracking-wide uppercase font-mono">{workflowResponse.recommendation.product.category}</span>
                       </div>
                     </div>
@@ -747,24 +754,69 @@ export default function Home() {
                   </p>
 
                   {/* Attributes list */}
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3 pt-2">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-2">
                     <div className="bg-slate-50 p-2.5 rounded-lg text-[11px] border border-slate-100">
-                      <span className="text-slate-400 block uppercase font-bold text-[9px]">Stock Availability</span>
-                      <span className="text-slate-700 font-semibold font-mono">{workflowResponse.recommendation.product.stock} units in stock</span>
+                      <span className="text-slate-400 block uppercase font-bold text-[9px]">Merchant Store</span>
+                      <span className="text-slate-800 font-bold font-mono truncate block">{workflowResponse.recommendation.product.merchantName || "Verified Merchant"}</span>
                     </div>
                     <div className="bg-slate-50 p-2.5 rounded-lg text-[11px] border border-slate-100">
-                      <span className="text-slate-400 block uppercase font-bold text-[9px]">Battery Life</span>
-                      <span className="text-slate-700 font-semibold font-mono">{workflowResponse.recommendation.product.batteryLife || "Not Applicable"}</span>
+                      <span className="text-slate-400 block uppercase font-bold text-[9px]">Warranty</span>
+                      <span className="text-slate-700 font-semibold font-mono truncate block">{workflowResponse.recommendation.product.warranty || "1 Year Standard"}</span>
                     </div>
                     <div className="bg-slate-50 p-2.5 rounded-lg text-[11px] border border-slate-100">
-                      <span className="text-slate-400 block uppercase font-bold text-[9px]">Compatibility list</span>
-                      <span className="text-slate-700 font-semibold truncate block">
-                        {workflowResponse.recommendation.product.compatibleWith.length > 0 
-                          ? workflowResponse.recommendation.product.compatibleWith.join(", ") 
-                          : "General compatibility"}
-                      </span>
+                      <span className="text-slate-400 block uppercase font-bold text-[9px]">Delivery</span>
+                      <span className="text-slate-700 font-semibold font-mono truncate block">{workflowResponse.recommendation.product.deliveryEstimate || "2-3 business days"}</span>
+                    </div>
+                    <div className="bg-slate-50 p-2.5 rounded-lg text-[11px] border border-slate-100">
+                      <span className="text-slate-400 block uppercase font-bold text-[9px]">Stock</span>
+                      <span className="text-slate-700 font-semibold font-mono">{workflowResponse.recommendation.product.stock} units</span>
                     </div>
                   </div>
+
+                  {/* Multi-Merchant Comparison Candidates Panel */}
+                  {workflowResponse.comparisonCandidates && workflowResponse.comparisonCandidates.length > 1 && (
+                    <div className="mt-4 pt-3 border-t border-slate-100">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider font-mono">
+                          🏬 Multi-Merchant Options Compared ({workflowResponse.comparisonCandidates.length} Stores):
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        {workflowResponse.comparisonCandidates.map((cand: any, cIdx: number) => {
+                          const isSelected = cand.product.id === workflowResponse.recommendation.product.id;
+                          return (
+                            <div
+                              key={cand.product.id || cIdx}
+                              className={`p-3 rounded-xl border font-mono text-xs transition-all ${
+                                isSelected
+                                  ? "bg-indigo-50/50 border-indigo-300 ring-1 ring-indigo-200"
+                                  : "bg-slate-50/60 border-slate-200/70"
+                              }`}
+                            >
+                              <div className="flex justify-between items-start">
+                                <div>
+                                  <span className="font-bold text-slate-900 block">{cand.product.name}</span>
+                                  <span className="text-[10px] text-slate-500">{cand.product.merchantName}</span>
+                                </div>
+                                <div className="text-right">
+                                  <span className="font-black text-indigo-600">₹{cand.product.price}</span>
+                                  {cand.merchantComparisonBadge && (
+                                    <span className="block text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100 mt-0.5">
+                                      {cand.merchantComparisonBadge}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400 border-t border-slate-100 pt-1.5">
+                                <span>{cand.product.warranty}</span>
+                                <span>{cand.product.deliveryEstimate}</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Display tradeoffs if applicable */}
                   {workflowResponse.tradeoffs && workflowResponse.tradeoffs.length > 0 && (
@@ -1175,9 +1227,10 @@ export default function Home() {
                       );
                       return (
                         <div key={item.id} className={`flex justify-between items-start text-xs font-semibold text-slate-800 ${isAccessory ? "pl-3 border-l-2 border-indigo-50/70" : ""}`}>
-                          <span className="truncate max-w-[70%]">
-                            {item.name} {isAccessory && <span className="text-[10px] text-indigo-500 font-mono font-bold">(Accessory)</span>}
-                          </span>
+                          <div className="truncate max-w-[70%]">
+                            <div>{item.name} {isAccessory && <span className="text-[10px] text-indigo-500 font-mono font-bold">(Accessory)</span>}</div>
+                            {item.merchantName && <div className="text-[10px] text-slate-400 font-mono font-normal">Sold by {item.merchantName}</div>}
+                          </div>
                           <span className="font-mono text-slate-500">₹{item.price}</span>
                         </div>
                       );

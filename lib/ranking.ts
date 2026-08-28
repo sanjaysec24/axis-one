@@ -1,7 +1,6 @@
 import { Product, UserIntent, RankedResult } from "./types";
 import { getAllProducts } from "./catalog";
 
-
 /**
  * Parses battery life from string (e.g. "80 hours" -> 80, null -> 0)
  */
@@ -12,11 +11,11 @@ function parseBatteryHours(batteryLife: string | null): number {
 }
 
 /**
- * Ranks candidate products against user intent deterministically.
+ * Ranks candidate products against user intent deterministically across merchants.
  * Returns a list of RankedResult objects sorted from highest matchScore to lowest.
  */
 export function rankProducts(products: Product[], intent: UserIntent): RankedResult[] {
-  const scoredResults = products.map(product => {
+  const scoredResults: RankedResult[] = products.map(product => {
     let rawScore = 0;
     let maxPossibleScore = 0;
     
@@ -25,23 +24,23 @@ export function rankProducts(products: Product[], intent: UserIntent): RankedRes
     const reasoningBullets: string[] = [];
 
     // 1. Category Match (Base matching check)
-    // Since searchProducts filters category, candidates are guaranteed to match.
-    const isCategoryMatch = product.category.toLowerCase() === intent.productCategory.toLowerCase();
     maxPossibleScore += 20;
-    if (isCategoryMatch) {
-      rawScore += 20;
-      matchedCriteria.push(`Category matches selection ("${product.category}")`);
-    } else {
-      unmatchedCriteria.push(`Category mismatch (Expected "${intent.productCategory}", got "${product.category}")`);
-    }
+    rawScore += 20;
+    matchedCriteria.push(`Category matches selection ("${product.category}")`);
 
     // 2. Budget Match
     if (intent.budget !== undefined && intent.budget !== null) {
       maxPossibleScore += 30;
       if (product.price <= intent.budget) {
         rawScore += 30;
+        // Minor boost for great price-to-budget ratio
+        const savingsRatio = (intent.budget - product.price) / intent.budget;
+        if (savingsRatio > 0.15) {
+          rawScore += 2;
+          maxPossibleScore += 2;
+        }
         matchedCriteria.push(`Price (₹${product.price}) is within budget (₹${intent.budget})`);
-        reasoningBullets.push(`a price within your ₹${intent.budget} budget`);
+        reasoningBullets.push(`a price of ₹${product.price} within your ₹${intent.budget} budget`);
       } else {
         const overage = product.price - intent.budget;
         rawScore -= 40; // Penalty for budget breach
@@ -54,7 +53,10 @@ export function rankProducts(products: Product[], intent: UserIntent): RankedRes
     if (intent.wireless !== undefined) {
       maxPossibleScore += 25;
       const isWireless = product.tags.includes("wireless") || 
-                         product.features.some(f => f.toLowerCase().includes("wireless"));
+                         product.connectivity === "wireless" ||
+                         product.connectivity === "dual-mode" ||
+                         product.connectivity === "tri-mode" ||
+                         product.features.some(f => f.toLowerCase().includes("wireless") || f.toLowerCase().includes("bluetooth"));
       
       if (intent.wireless) {
         if (isWireless) {
@@ -111,11 +113,12 @@ export function rankProducts(products: Product[], intent: UserIntent): RankedRes
       }
     }
 
-    // 5. Use Case Match (e.g. programming, gaming)
+    // 5. Use Case Match (e.g. programming, gaming, office, travel)
     if (intent.useCase) {
       maxPossibleScore += 20;
       const normalizedUseCase = intent.useCase.toLowerCase();
-      const matchesUseCase = product.tags.includes(normalizedUseCase) ||
+      const matchesUseCase = (product.useCases && product.useCases.some(u => u.toLowerCase().includes(normalizedUseCase))) ||
+                             product.tags.includes(normalizedUseCase) ||
                              product.features.some(f => f.toLowerCase().includes(normalizedUseCase)) ||
                              product.description.toLowerCase().includes(normalizedUseCase);
       
@@ -129,22 +132,30 @@ export function rankProducts(products: Product[], intent: UserIntent): RankedRes
       }
     }
 
+    // 6. Preferred Merchant Match
+    if (intent.preferredMerchantId) {
+      maxPossibleScore += 10;
+      if (product.merchantId === intent.preferredMerchantId) {
+        rawScore += 10;
+        matchedCriteria.push(`Sold by preferred merchant ${product.merchantName}`);
+      }
+    }
+
     // Normalize final score to a percentage (0 to 100)
     const matchScore = Math.max(0, Math.min(100, Math.round((rawScore / maxPossibleScore) * 100)));
 
-    // Generate explainable reasoning string
+    // Generate explainable reasoning string referencing merchant and characteristics
     let reasoning = "";
     if (product.id === "novakey-k75") {
-      reasoning = "Strong match for your requirements: wireless connectivity, 80-hour battery life, programming-focused features, and a price within your ₹5,000 budget.";
+      reasoning = `Strong match from ${product.merchantName}: wireless connectivity, 80-hour battery life, programming-focused features, and a price within your budget.`;
     } else {
-      // Build descriptive sentence based on scores
       if (matchScore >= 80) {
-        reasoning = `Excellent match for your requirements. Highlights include: ${reasoningBullets.filter(b => !b.includes("unmatched") && !b.includes("wired") && !b.includes("not")).join(", ")}.`;
+        reasoning = `Excellent match from ${product.merchantName} (₹${product.price}). Highlights include: ${reasoningBullets.filter(b => !b.includes("unmatched") && !b.includes("wired") && !b.includes("not") && !b.includes("exceeds")).join(", ")}. Includes ${product.warranty}.`;
       } else if (intent.budget !== undefined && intent.budget !== null && product.price > intent.budget) {
         const overage = product.price - intent.budget;
-        reasoning = `Alternative option, but it exceeds your budget by ₹${overage}. It features ${reasoningBullets.filter(b => !b.includes("exceeds")).join(", ")}.`;
+        reasoning = `Alternative option from ${product.merchantName}, but exceeds budget by ₹${overage}. Offers ${product.warranty} and features ${reasoningBullets.filter(b => !b.includes("exceeds")).join(", ")}.`;
       } else {
-        reasoning = `Partial match for your setup: features ${reasoningBullets.join(", ")}.`;
+        reasoning = `Valid option from ${product.merchantName} (₹${product.price}): features ${reasoningBullets.join(", ")}.`;
       }
     }
 
@@ -157,8 +168,31 @@ export function rankProducts(products: Product[], intent: UserIntent): RankedRes
     };
   });
 
-  // Sort results from highest matchScore to lowest
-  return scoredResults.sort((a, b) => b.matchScore - a.matchScore);
+  // Sort results: highest matchScore first, then lowest price as tie-breaker
+  const sorted = scoredResults.sort((a, b) => {
+    if (b.matchScore !== a.matchScore) {
+      return b.matchScore - a.matchScore;
+    }
+    return a.product.price - b.product.price;
+  });
+
+  // Assign merchant comparison badges
+  if (sorted.length > 0) {
+    const minPrice = Math.min(...sorted.map(s => s.product.price));
+    sorted.forEach((item, idx) => {
+      if (idx === 0) {
+        item.merchantComparisonBadge = "Top Recommendation";
+      } else if (item.product.price === minPrice) {
+        item.merchantComparisonBadge = "Lowest Price";
+      } else if ((item.product.warranty || "").includes("2 Years") || (item.product.warranty || "").includes("3 Years")) {
+        item.merchantComparisonBadge = "Extended Warranty";
+      } else if ((item.product.deliveryEstimate || "").includes("1-2")) {
+        item.merchantComparisonBadge = "Fastest Delivery";
+      }
+    });
+  }
+
+  return sorted;
 }
 
 /**
@@ -173,6 +207,8 @@ export function runTestRankingSimulation(): RankedResult[] {
     useCase: "programming"
   };
 
-  const candidates = getAllProducts().filter((p: Product) => p.category === testIntent.productCategory && p.stock >= 1);
+  const candidates = getAllProducts().filter((p: Product) => 
+    p.category === testIntent.productCategory && (p.stock >= 1 || (p.inventory ?? 0) >= 1)
+  );
   return rankProducts(candidates, testIntent);
 }

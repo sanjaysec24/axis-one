@@ -7,6 +7,7 @@ import {
   CommerceConversationContext,
   ResponseIntent 
 } from "./types";
+import { routeConversationalMessage } from "./conversationRouter";
 
 /**
  * Validates the extracted intent object against the business rules.
@@ -54,7 +55,8 @@ function validateExtractedIntent(intent: any): UserIntent {
     ...(intent.budget !== undefined && intent.budget !== null ? { budget: intent.budget } : {}),
     ...(intent.wireless !== undefined && intent.wireless !== null ? { wireless: intent.wireless } : {}),
     ...(intent.batteryPriority ? { batteryPriority: intent.batteryPriority } : {}),
-    ...(intent.useCase ? { useCase: intent.useCase } : {})
+    ...(intent.useCase ? { useCase: intent.useCase } : {}),
+    ...(intent.preferredMerchantId ? { preferredMerchantId: intent.preferredMerchantId } : {})
   };
 }
 
@@ -64,13 +66,13 @@ function validateExtractedIntent(intent: any): UserIntent {
 export async function extractIntentFromMessage(message: string): Promise<UserIntent> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error("GEMINI_API_KEY environment variable is not configured on the server.");
+    return extractIntentFromMessageFallback(message);
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
   
   const systemInstruction = 
-    "You are the AXIS ONE intent extraction layer for a merchant commerce system.\n\n" +
+    "You are the AXIS ONE intent extraction layer for a multi-merchant commerce system.\n\n" +
     "Convert the user's shopping request into structured requirements.\n\n" +
     "Extract only information that is explicitly stated or reasonably inferred.\n\n" +
     "Return valid structured data.\n\n" +
@@ -93,7 +95,7 @@ export async function extractIntentFromMessage(message: string): Promise<UserInt
         properties: {
           productCategory: {
             type: SchemaType.STRING,
-            description: "The shopping category requested, e.g. 'Mechanical Keyboard', 'Wireless Mouse', 'Wrist Rest', 'Mouse Pad', 'Headphones', 'Laptop Stand'."
+            description: "The shopping category requested, e.g. 'Mechanical Keyboard', 'Wireless Keyboard', 'Gaming Keyboard', 'Wireless Mouse', 'Wrist Rest', 'Mouse Pad', 'Headphones', 'Monitors', 'Webcams', 'USB Hubs', 'Laptop Accessories'."
           },
           budget: {
             type: SchemaType.INTEGER,
@@ -111,7 +113,7 @@ export async function extractIntentFromMessage(message: string): Promise<UserInt
           },
           useCase: {
             type: SchemaType.STRING,
-            description: "The intended use case, e.g. 'gaming', 'programming', 'office', 'travel'."
+            description: "The intended use case, e.g. 'gaming', 'programming', 'office', 'travel', 'ergonomics'."
           }
         },
         required: ["productCategory"]
@@ -126,25 +128,19 @@ export async function extractIntentFromMessage(message: string): Promise<UserInt
     const text = result.response.text();
     
     if (!text) {
-      throw new Error("Gemini returned an empty response.");
+      return extractIntentFromMessageFallback(message);
     }
 
     let parsedJson;
     try {
       parsedJson = JSON.parse(text);
     } catch (err) {
-      throw new Error("Malformed JSON received from Gemini: " + text);
+      return extractIntentFromMessageFallback(message);
     }
 
     return validateExtractedIntent(parsedJson);
   } catch (error: any) {
-    console.warn("Gemini Intent Extraction failed. Degrading to deterministic fallback. Error Details:", {
-      selectedModel: "gemini-3.5-flash",
-      apiKeyExists: !!apiKey,
-      message: error.message,
-      status: error.status || "N/A",
-      errorStack: error.stack
-    });
+    console.warn("Gemini Intent Extraction failed. Degrading to deterministic fallback. Error:", error.message);
     return extractIntentFromMessageFallback(message);
   }
 }
@@ -167,19 +163,43 @@ export function deriveResponseIntent(
   }
 
   // 2. Direct payment inquiries
-  if (/\b(payment|checkout|how to pay|where to pay|proceed to pay|pay now)\b/i.test(query)) {
+  if (action === "PAYMENT_GUIDANCE" || /\b(payment|checkout|how to pay|where to pay|proceed to pay|pay now)\b/i.test(query)) {
     return "PAYMENT_GUIDANCE";
   }
 
-  // 3. User action mappings
-  if (action === "CONFIRM_SELECTION") {
+  // 3. Comparisons
+  if (action === "PRODUCT_COMPARISON" || /\b(compare|which merchant|different stores|better warranty|better deal)\b/i.test(query)) {
+    return "PRODUCT_COMPARISON";
+  }
+
+  // 4. Clarification
+  if (action === "CLARIFICATION_REQUIRED") {
+    return "CLARIFICATION_REQUIRED";
+  }
+
+  // 5. Thanks & Farewell
+  if (action === "THANKS") {
+    return "THANKS";
+  }
+  if (action === "FAREWELL") {
+    return "FAREWELL";
+  }
+
+  // 6. User action mappings
+  if (action === "CONFIRM_SELECTION" || action === "CONFIRM_REFERENCED_PRODUCT") {
     return "CONFIRMATION";
+  }
+  if (action === "KEEP_CURRENT_SELECTION") {
+    return "KEEP_CURRENT_SELECTION";
   }
   if (action === "CANCEL_SELECTION") {
     return "PAYMENT_CANCELLED";
   }
   if (action === "REMOVE_UPSELL" || action === "REMOVE_PRODUCT") {
     return "REMOVE_UPSELL";
+  }
+  if (action === "ADD_UPSELL") {
+    return "ADD_UPSELL";
   }
   if (action === "CHANGE_BUDGET") {
     return "BUDGET_UPDATE";
@@ -211,7 +231,7 @@ export async function generateExplanation(
 ): Promise<Omit<ExplanationResult, "source">> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error("GEMINI_API_KEY environment variable is not configured on the server.");
+    return generateFallbackExplanation(context);
   }
 
   const responseIntent = context.responseIntent || deriveResponseIntent(
@@ -225,18 +245,17 @@ export async function generateExplanation(
   const genAI = new GoogleGenerativeAI(apiKey);
 
   const systemInstruction = 
-    "You are AXIS ONE, an intelligent AI commerce buyer and recommendation advisor.\n\n" +
+    "You are AXIS ONE, an intelligent multi-merchant AI commerce buyer.\n\n" +
     "Your job is to generate a helpful, natural, non-repetitive, context-aware response for the user based strictly on the provided structured commerce data.\n\n" +
     "CRITICAL CONVERSATIONAL RULES:\n" +
     "1. NEVER repeat generic canned pitches across multiple conversation turns.\n" +
     "2. If the user asks a specific question (e.g., 'Is it wireless?', 'Why did you recommend this?', 'Remove the wrist rest'), ANSWER THAT SPECIFIC QUESTION DIRECTLY in the 'summary' field.\n" +
-    "3. GREETING: 1 short sentence greeting the user and acknowledging their active item if one exists.\n" +
+    "3. GREETING: 1 natural sentence greeting the user and acknowledging their active item if one exists.\n" +
     "4. CONFIRMATION: 1 sentence confirming the basket is locked in for checkout, and directing them to click 'Pay securely via Razorpay' in the right-hand panel.\n" +
     "5. REMOVE_UPSELL / REMOVE_PRODUCT: 1 sentence confirming the removal and stating the updated basket total.\n" +
-    "6. CHEAPER_ALTERNATIVE / REQUEST_CHEAPER: 2 sentences naming the cheaper option, exact price, savings compared to previous selection, and any trade-off (e.g. wired vs wireless).\n" +
-    "7. BUDGET_UPDATE: 2 sentences confirming the recalculated budget and why the new recommendation fits best.\n" +
-    "8. REQUEST_EXPLANATION / PRODUCT_COMPARISON: 2–3 informative sentences detailing why this product scored highest, key matching criteria, and trade-offs.\n" +
-    "9. Use only the provided facts, prices, discounts, and policy validation results. Do not invent features or prices.";
+    "6. CHEAPER_ALTERNATIVE / REQUEST_CHEAPER: 2 sentences naming the cheaper option, merchant name, exact price, savings, and any trade-off.\n" +
+    "7. PRODUCT_COMPARISON: Summarize the distinct offerings from the matched merchants (lowest price merchant, best warranty merchant, and top match).\n" +
+    "8. Use only the provided facts, prices, warranties, and merchant names. Do not invent features or prices.";
 
   const model = genAI.getGenerativeModel({
     model: "gemini-3.5-flash",
@@ -248,23 +267,23 @@ export async function generateExplanation(
         properties: {
           recommendationExplanation: {
             type: SchemaType.STRING,
-            description: "Concise explanation of why the recommended product matches the user requirements."
+            description: "Detailed explanation of why the product matches the requirements and merchant source."
           },
           upsellExplanation: {
             type: SchemaType.STRING,
-            description: "Concise explanation of why the upsell or cross-sell is relevant. If upsell is null, gracefully state that no complementary product was added."
+            description: "Explanation of why the accessory complements the purchase and fits the budget."
           },
           budgetExplanation: {
             type: SchemaType.STRING,
-            description: "Concise explanation of whether the basket fits the user's budget."
+            description: "Breakdown of the basket total against user budget."
           },
           policyExplanation: {
             type: SchemaType.STRING,
-            description: "Concise explanation of the policy validation outcome."
+            description: "Verification results for inventory, discount rules, and safety caps."
           },
           summary: {
             type: SchemaType.STRING,
-            description: "The primary conversational response displayed to the user in the chat feed. Must answer the user's latest query directly."
+            description: "The primary conversational response message addressing the user directly."
           }
         },
         required: [
@@ -278,31 +297,17 @@ export async function generateExplanation(
     }
   });
 
-  const prompt = `Generate an adaptive, context-aware commerce response for responseIntent="${responseIntent}" and userQuery="${context.userQuery || ''}" based ONLY on this structured recommendation context:\n\n${JSON.stringify({ ...context, responseIntent }, null, 2)}`;
-  
+  const prompt = `Generate an explanation for this commerce context (Intent Type: ${responseIntent}):\n\n${JSON.stringify(context, null, 2)}`;
+
   try {
     const result = await model.generateContent(prompt);
     const text = result.response.text();
-    
+
     if (!text) {
-      throw new Error("Gemini returned an empty explanation response.");
+      return generateFallbackExplanation(context);
     }
 
-    let parsedJson;
-    try {
-      parsedJson = JSON.parse(text);
-    } catch (err) {
-      throw new Error("Malformed JSON received from Gemini: " + text);
-    }
-
-    // Validate fields in JSON response
-    const fields = ["recommendationExplanation", "upsellExplanation", "budgetExplanation", "policyExplanation", "summary"];
-    for (const field of fields) {
-      if (typeof parsedJson[field] !== "string" || parsedJson[field].trim() === "") {
-        throw new Error(`Invalid or missing field "${field}" in Gemini explanation response.`);
-      }
-    }
-
+    const parsedJson = JSON.parse(text);
     return {
       recommendationExplanation: parsedJson.recommendationExplanation,
       upsellExplanation: parsedJson.upsellExplanation,
@@ -311,14 +316,8 @@ export async function generateExplanation(
       summary: parsedJson.summary
     };
   } catch (error: any) {
-    console.error("Gemini Explanation Generation Error Details:", {
-      selectedModel: "gemini-3.5-flash",
-      apiKeyExists: !!apiKey,
-      message: error.message,
-      status: error.status || "N/A",
-      errorStack: error.stack
-    });
-    throw error;
+    console.warn("Gemini Explanation failed. Degrading to deterministic fallback. Error:", error.message);
+    return generateFallbackExplanation(context);
   }
 }
 
@@ -328,7 +327,7 @@ export async function generateExplanation(
 export function generateFallbackExplanation(
   context: ExplanationContext
 ): Omit<ExplanationResult, "source"> {
-  const { intent, recommendation, upsell, basket, policyValidation, previousProduct, tradeoffs, action, userQuery, transactionState, recentMessages } = context;
+  const { intent, recommendation, upsell, basket, policyValidation, previousProduct, tradeoffs, action, userQuery, transactionState, recentMessages, merchantComparison } = context;
 
   const responseIntent = context.responseIntent || deriveResponseIntent(
     action,
@@ -341,6 +340,7 @@ export function generateFallbackExplanation(
   const query = (userQuery || "").toLowerCase().trim();
 
   // 1. Recommendation Explanation
+  const merchantPart = recommendation.merchantName ? `from ${recommendation.merchantName}` : "";
   const batteryStr = recommendation.matchedCriteria.find(c => c.toLowerCase().includes("battery")) || "";
   const batteryPart = batteryStr ? `provides ${batteryStr.toLowerCase()}` : "";
   const wirelessPart = recommendation.matchedCriteria.some(c => c.toLowerCase().includes("wireless")) ? "wireless connectivity" : "";
@@ -350,7 +350,7 @@ export function generateFallbackExplanation(
     ? `featuring ${criteriaParts.join(" and ")}` 
     : "matching your requirements";
 
-  const recExp = `${recommendation.name} at ₹${recommendation.price} fits your criteria (${criteriaText}).`;
+  const recExp = `${recommendation.name} ${merchantPart} at ₹${recommendation.price} fits your criteria (${criteriaText}).`;
 
   // 2. Upsell Explanation
   let upsellExp = "";
@@ -405,34 +405,46 @@ export function generateFallbackExplanation(
   } else {
     switch (responseIntent) {
       case "GREETING": {
-        summary = `Hey! Your current selection of the ${recommendation.name} (₹${recommendation.price}) is active. Would you like to compare it, adjust your budget, or proceed to checkout?`;
+        const mName = recommendation.merchantName ? ` from ${recommendation.merchantName}` : "";
+        summary = `Hey! 👋 Your ${recommendation.name}${mName} selection (₹${recommendation.price}) is active. Want to compare alternatives, adjust your budget, or continue to checkout?`;
+        break;
+      }
+
+      case "PRODUCT_COMPARISON": {
+        if (merchantComparison && merchantComparison.comparisonText) {
+          summary = merchantComparison.comparisonText;
+        } else {
+          const prevName = previousProduct ? previousProduct.name : "the previous option";
+          const prevPrice = previousProduct ? `₹${previousProduct.price}` : "higher price";
+          summary = `Compared to ${prevName} (${prevPrice}), ${recommendation.name} from ${recommendation.merchantName || "merchant"} (₹${recommendation.price}) adjusts your total to ₹${basket.total}.`;
+        }
         break;
       }
 
       case "INITIAL_RECOMMENDATION": {
-        const budgetClause = intent.budget ? `Based on your ₹${intent.budget} budget and preferences` : "Based on your requirements";
-        const remainingClause = basket.remainingBudget > 0 ? ` It leaves ₹${basket.remainingBudget} in budget flexibility.` : "";
-        const upsellClause = upsell ? ` I've also paired it with an optional ${upsell.name} (₹${upsell.price}) for better ergonomics.` : "";
-        summary = `${budgetClause}, I recommend the ${recommendation.name} (₹${recommendation.price}).${remainingClause}${upsellClause}`;
+        const merchantTag = recommendation.merchantName ? ` from ${recommendation.merchantName}` : "";
+        const budgetClause = intent.budget ? `Found top options within your ₹${intent.budget} budget.` : "Found top options matching your requirements.";
+        const upsellClause = upsell ? ` Pair it with an optional ${upsell.name} (₹${upsell.price}) for enhanced ergonomics.` : "";
+        summary = `${budgetClause} I recommend the ${recommendation.name}${merchantTag} at ₹${recommendation.price} (${recommendation.matchScore}% match).${upsellClause}`;
         break;
       }
 
       case "BUDGET_UPDATE": {
         const wirelessPreserved = recommendation.matchedCriteria.some(c => c.toLowerCase().includes("wireless")) ? " while preserving your wireless preference" : "";
-        summary = `Got it — I've recalculated the options for your new ₹${intent.budget} budget. The ${recommendation.name} (₹${recommendation.price}) fits best${wirelessPreserved}.`;
+        summary = `Got it — I've recalculated the options for your new ₹${intent.budget} budget. The ${recommendation.name} from ${recommendation.merchantName || "store"} (₹${recommendation.price}) fits best${wirelessPreserved}.`;
         break;
       }
 
       case "CHEAPER_ALTERNATIVE": {
         let tradeOffText = "";
         if (tradeoffs && tradeoffs.length > 0) {
-          tradeOffText = ` The trade-off is: ${tradeoffs.join(" ")}`;
+          tradeOffText = ` Note trade-off: ${tradeoffs.join(" ")}`;
         } else {
-          tradeOffText = " It provides essential core functionality at a lower price point.";
+          tradeOffText = " It delivers core functionality at an economical price.";
         }
         const savings = previousProduct ? previousProduct.price - recommendation.price : 0;
         const savingsText = savings > 0 ? ` (saving ₹${savings})` : "";
-        summary = `I found a cheaper option: ${recommendation.name} at ₹${recommendation.price}${savingsText}.${tradeOffText}`;
+        summary = `I found a cheaper option: ${recommendation.name} from ${recommendation.merchantName || "store"} at ₹${recommendation.price}${savingsText}.${tradeOffText}`;
         break;
       }
 
@@ -447,40 +459,46 @@ export function generateFallbackExplanation(
         break;
       }
 
-      case "REQUEST_EXPLANATION": {
-        const matchCriteria = recommendation.matchedCriteria.length > 0 ? recommendation.matchedCriteria.join(", ") : "your search criteria";
-        let tradeText = "";
-        if (tradeoffs && tradeoffs.length > 0) {
-          tradeText = ` Note trade-offs: ${tradeoffs.join(" ")}`;
-        }
-        summary = `I recommended the ${recommendation.name} because it satisfies your strongest requirements (${matchCriteria}) at ₹${recommendation.price}. It scored highest in our catalog evaluation with verified stock and merchant policy compliance.${tradeText}`;
+      case "KEEP_CURRENT_SELECTION": {
+        summary = `Understood — keeping your active selection of the ${recommendation.name} (₹${recommendation.price}).`;
         break;
       }
 
-      case "PRODUCT_COMPARISON": {
-        const prevName = previousProduct ? previousProduct.name : "the previous option";
-        const prevPrice = previousProduct ? `₹${previousProduct.price}` : "higher price";
-        let tradeText = "";
-        if (tradeoffs && tradeoffs.length > 0) {
-          tradeText = ` Key trade-offs: ${tradeoffs.join(" ")}`;
-        }
-        summary = `Compared to ${prevName} (${prevPrice}), the ${recommendation.name} (₹${recommendation.price}) adjusts your cost to ₹${basket.total}.${tradeText} Both fit within merchant policy rules.`;
+      case "REQUEST_EXPLANATION": {
+        const matchCriteria = recommendation.matchedCriteria.length > 0 ? recommendation.matchedCriteria.join(", ") : "your search criteria";
+        const mText = recommendation.merchantName ? ` from ${recommendation.merchantName}` : "";
+        summary = `I recommended the ${recommendation.name}${mText} because it satisfies your strongest requirements (${matchCriteria}) at ₹${recommendation.price}. It scored highest in our multi-merchant catalog evaluation with verified inventory and policy compliance.`;
         break;
       }
 
       case "CONFIRMATION": {
-        summary = `Great choice! Your basket with ${recommendation.name} is locked in and ready for secure checkout.`;
+        summary = `Great choice! Your basket with ${recommendation.name} from ${recommendation.merchantName || "merchant"} is locked in. Click 'Pay securely via Razorpay' to complete checkout.`;
         break;
       }
 
       case "PAYMENT_GUIDANCE": {
         if (transactionState === "USER_CONFIRMED") {
-          summary = `Your basket is confirmed! Click the 'Pay securely via Razorpay' button in the Proposed Basket panel on the right to complete checkout in test mode.`;
+          summary = `Your basket is confirmed! Click the 'Pay securely via Razorpay' button in the Proposed Basket panel on the right to complete checkout.`;
         } else if (transactionState === "PAYMENT_CANCELLED" || transactionState === "PAYMENT_FAILED") {
           summary = `Your basket is saved. Click 'Retry Payment Checkout' on the right whenever you're ready to proceed.`;
         } else {
-          summary = `When you're ready to buy, simply say 'Okay, I'll take it' to confirm your basket and unlock checkout.`;
+          summary = `When you're ready to buy, simply say 'Okay, I'll take it' or 'confirm' to approve your basket and unlock the payment checkout button.`;
         }
+        break;
+      }
+
+      case "THANKS": {
+        summary = "You're very welcome! Let me know if you'd like to adjust your selection, compare stores, or proceed to checkout.";
+        break;
+      }
+
+      case "FAREWELL": {
+        summary = "Goodbye! Your basket and preferences will be ready whenever you return.";
+        break;
+      }
+
+      case "CLARIFICATION_REQUIRED": {
+        summary = `Sure — could you clarify what you mean, or tell me your budget and feature preferences?`;
         break;
       }
 
@@ -524,6 +542,7 @@ export function generateFallbackExplanation(
 
 /**
  * Classifies user follow-up messages in context of the conversation.
+ * Runs deterministic fast router BEFORE expensive Gemini call.
  */
 export async function classifyFollowUp(
   message: string,
@@ -534,7 +553,20 @@ export async function classifyFollowUp(
   wireless?: boolean;
   batteryPriority?: "low" | "medium" | "high";
   useCase?: string;
+  targetCandidateIndex?: number;
+  directMessage?: string;
 }> {
+  // 1. Run deterministic fast router first
+  const fastRoute = routeConversationalMessage(message, context);
+  if (fastRoute.confidence >= 0.9 && fastRoute.action !== "UNKNOWN") {
+    return {
+      action: fastRoute.action,
+      targetCandidateIndex: fastRoute.targetCandidateIndex,
+      directMessage: fastRoute.directMessage,
+      ...(fastRoute.extractedRequirements || {})
+    };
+  }
+
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return classifyFollowUpFallback(message, context);
@@ -542,20 +574,20 @@ export async function classifyFollowUp(
 
   const systemInstruction = 
     "You are the AXIS ONE conversational follow-up classification layer.\n\n" +
-    "Your job is to analyze the user's follow-up message in the context of the ongoing commerce session and classify it into exactly one of the following actions:\n" +
-    "1. GREETING: Casual hello/greetings (e.g. 'hi', 'hello', 'hey').\n" +
-    "2. CONFIRM_SELECTION: User confirms they want to proceed, accept, or buy the proposed basket (e.g. 'Okay, I'll take it', 'I will buy this', 'confirm', 'buy', 'yes', 'proceed', 'looks good').\n" +
-    "3. CANCEL_SELECTION: User wants to cancel or stop the purchase flow (e.g. 'cancel', 'I changed my mind', 'nevermind').\n" +
-    "4. REMOVE_UPSELL: User explicitly rejects or wants to remove the recommended upsell/cross-sell accessory (e.g. 'I don't want the wrist rest', 'remove the support', 'remove it', 'drop the accessory').\n" +
-    "5. REMOVE_PRODUCT: User wants to remove the main product or clear cart (e.g. 'remove the keyboard', 'clear cart').\n" +
-    "6. REQUEST_CHEAPER_OPTION: User wants a cheaper alternative (e.g. 'make it cheaper', 'anything cheaper?', 'show me something cheaper', 'is there a cheaper one?', 'cheaper', 'expensive', 'too costly').\n" +
-    "7. REQUEST_ALTERNATIVE: User wants to see other alternative options (e.g. 'show me another one', 'show alternative', 'what else do you have?').\n" +
-    "8. REQUEST_EXPLANATION: User asks for an explanation, reasoning, comparison, or why it was recommended (e.g. 'Why did you recommend this?', 'Why this one?', 'Why ClickyLite instead of SwiftType?').\n" +
-    "9. CHANGE_BUDGET: User wants to change their budget limit (e.g. 'My budget is 4000', 'under ₹3500', 'make my budget 3000').\n" +
-    "10. MODIFY_REQUIREMENTS: User wants to change features (e.g. 'I prefer wired', 'I don't need wireless', 'need longer battery life').\n" +
-    "11. GENERAL_QUESTION: User asks a specific product fact question (e.g. 'Is it wireless?', 'Does it work with Mac?', 'What is the battery life?', 'how to pay?').\n" +
-    "12. NEW_SEARCH: User wants to start a fresh search for a different product or category (e.g. 'I need a wireless mouse', 'search for headphones').\n\n" +
-    "Extract any new values mentioned (e.g. budget, wireless preference, battery priority, useCase) ONLY if relevant.\n\n" +
+    "Analyze the user's follow-up message in context and classify it into exactly one action:\n" +
+    "1. GREETING: Casual hello/greetings ('hi', 'hello').\n" +
+    "2. CONFIRM_SELECTION: User confirms/accepts the basket ('confirm', 'buy', 'yes', 'proceed', 'looks good').\n" +
+    "3. CANCEL_SELECTION: User cancels ('cancel', 'nevermind').\n" +
+    "4. REMOVE_UPSELL: User drops the accessory ('remove the wrist rest', 'remove it', 'drop the accessory').\n" +
+    "5. REMOVE_PRODUCT: User clears cart ('remove the keyboard').\n" +
+    "6. REQUEST_CHEAPER_OPTION: User wants a cheaper option ('cheaper', 'anything cheaper?').\n" +
+    "7. PRODUCT_COMPARISON: User compares stores or products ('compare', 'which merchant is cheaper?', 'show different stores').\n" +
+    "8. REQUEST_ALTERNATIVE: User wants other options ('show alternative', 'what else?').\n" +
+    "9. REQUEST_EXPLANATION: User asks why it was recommended ('why this one?', 'why?').\n" +
+    "10. CHANGE_BUDGET: User updates budget ('My budget is 4000').\n" +
+    "11. MODIFY_REQUIREMENTS: User updates features ('I prefer wired').\n" +
+    "12. PAYMENT_GUIDANCE: User asks about payment ('how to pay', 'checkout').\n" +
+    "13. NEW_SEARCH: User starts a fresh search ('search for mouse').\n\n" +
     "Return valid structured JSON.";
 
   try {
@@ -578,10 +610,12 @@ export async function classifyFollowUp(
                 "REMOVE_UPSELL",
                 "REMOVE_PRODUCT",
                 "REQUEST_CHEAPER_OPTION",
+                "PRODUCT_COMPARISON",
                 "REQUEST_ALTERNATIVE",
                 "REQUEST_EXPLANATION",
                 "CHANGE_BUDGET",
                 "MODIFY_REQUIREMENTS",
+                "PAYMENT_GUIDANCE",
                 "GENERAL_QUESTION",
                 "NEW_SEARCH"
               ],
@@ -589,17 +623,17 @@ export async function classifyFollowUp(
             },
             budget: {
               type: SchemaType.INTEGER,
-              description: "Extracted budget amount in INR if the user changes their budget."
+              description: "Extracted budget amount in INR if changed."
             },
             wireless: {
               type: SchemaType.BOOLEAN,
-              description: "Extracted wireless preference if changed (true for wireless/cordless, false for wired)."
+              description: "Extracted wireless preference if changed."
             },
             batteryPriority: {
               type: SchemaType.STRING,
               format: "enum",
               enum: ["low", "medium", "high"],
-              description: "Extracted battery life priority if changed."
+              description: "Extracted battery priority if changed."
             },
             useCase: {
               type: SchemaType.STRING,
@@ -617,7 +651,7 @@ export async function classifyFollowUp(
       recommendedProduct: context.recommendedProduct ? {
         name: context.recommendedProduct.name,
         price: context.recommendedProduct.price,
-        category: context.recommendedProduct.category
+        merchantName: context.recommendedProduct.merchantName
       } : null,
       currentUpsell: context.currentUpsell ? {
         name: context.currentUpsell.name,
@@ -626,7 +660,7 @@ export async function classifyFollowUp(
       recentMessages: context.recentMessages.slice(-5)
     };
 
-    const prompt = `Classify this user message:\n\n"${message}"\n\nGiven the current conversation context:\n${JSON.stringify(conversationContextSummary, null, 2)}`;
+    const prompt = `Classify this user message:\n\n"${message}"\n\nContext:\n${JSON.stringify(conversationContextSummary, null, 2)}`;
     
     const result = await model.generateContent(prompt);
     const text = result.response.text();
@@ -644,10 +678,7 @@ export async function classifyFollowUp(
       ...(parsed.useCase ? { useCase: String(parsed.useCase) } : {})
     };
   } catch (error: any) {
-    console.warn("Gemini Classification failed. Degrading to deterministic fallback. Error Details:", {
-      message: error.message,
-      status: error.status || "N/A"
-    });
+    console.warn("Gemini Classification failed. Degrading to deterministic fallback. Error:", error.message);
     return classifyFollowUpFallback(message, context);
   }
 }
@@ -668,10 +699,16 @@ export function extractIntentFromMessageFallback(message: string): UserIntent {
     productCategory = "Wrist Rest";
   } else if (normalized.includes("pad") || normalized.includes("mat")) {
     productCategory = "Mouse Pad";
-  } else if (normalized.includes("headphone") || normalized.includes("earphone") || normalized.includes("audio")) {
+  } else if (normalized.includes("headphone") || normalized.includes("earphone") || normalized.includes("headset") || normalized.includes("audio")) {
     productCategory = "Headphones";
+  } else if (normalized.includes("monitor") || normalized.includes("screen") || normalized.includes("display")) {
+    productCategory = "Monitors";
+  } else if (normalized.includes("webcam") || normalized.includes("camera")) {
+    productCategory = "Webcams";
   } else if (normalized.includes("stand")) {
-    productCategory = "Laptop Stand";
+    productCategory = "Laptop Accessories";
+  } else if (normalized.includes("hub") || normalized.includes("dock")) {
+    productCategory = "USB Hubs";
   }
 
   // 2. Budget extraction
@@ -684,12 +721,12 @@ export function extractIntentFromMessageFallback(message: string): UserIntent {
       budget = val;
     }
   } else {
-    // Search for numbers between 100 and 20000
+    // Search for numbers between 100 and 50000
     const numbers = message.match(/\b\d+(?:,\d{3})*\b/g);
     if (numbers) {
       for (const numStr of numbers) {
         const val = parseInt(numStr.replace(/,/g, ""), 10);
-        if (!isNaN(val) && val >= 100 && val <= 20000) {
+        if (!isNaN(val) && val >= 100 && val <= 50000) {
           budget = val;
         }
       }
@@ -714,12 +751,14 @@ export function extractIntentFromMessageFallback(message: string): UserIntent {
   let useCase: string | undefined;
   if (normalized.includes("programming") || normalized.includes("coding") || normalized.includes("coder") || normalized.includes("developer")) {
     useCase = "programming";
-  } else if (normalized.includes("gaming") || normalized.includes("gamer") || normalized.includes("play")) {
+  } else if (normalized.includes("gaming") || normalized.includes("gamer") || normalized.includes("play") || normalized.includes("esports")) {
     useCase = "gaming";
   } else if (normalized.includes("office") || normalized.includes("work")) {
     useCase = "office";
   } else if (normalized.includes("travel") || normalized.includes("portable")) {
     useCase = "travel";
+  } else if (normalized.includes("ergonomic") || normalized.includes("health") || normalized.includes("rsi")) {
+    useCase = "ergonomics";
   }
 
   return {
@@ -737,118 +776,20 @@ export function extractIntentFromMessageFallback(message: string): UserIntent {
 export function classifyFollowUpFallback(
   message: string,
   context: CommerceConversationContext
-): { action: ConversationAction; budget?: number; wireless?: boolean; batteryPriority?: "low" | "medium" | "high"; useCase?: string } {
+): { action: ConversationAction; budget?: number; wireless?: boolean; batteryPriority?: "low" | "medium" | "high"; useCase?: string; targetCandidateIndex?: number; directMessage?: string } {
+  const routerResult = routeConversationalMessage(message, context);
+  if (routerResult.action !== "UNKNOWN") {
+    return {
+      action: routerResult.action,
+      targetCandidateIndex: routerResult.targetCandidateIndex,
+      directMessage: routerResult.directMessage,
+      ...(routerResult.extractedRequirements || {})
+    };
+  }
+
   const normalized = message.toLowerCase().trim();
 
-  // 1. GREETING
-  if (/^(hi|hello|hey|greetings|good\s*(morning|afternoon|evening))\b/i.test(normalized) || normalized === "hi" || normalized === "hello" || normalized === "hey") {
-    return { action: "GREETING" };
-  }
-
-  // 2. CONFIRM_SELECTION
-  const confirmWords = [
-    "okay, i'll take it", 
-    "okay i'll take it", 
-    "okay i will take it",
-    "i'll take it",
-    "ill take it",
-    "take it", 
-    "confirm", 
-    "buy", 
-    "approve", 
-    "accept", 
-    "proceed", 
-    "yes", 
-    "looks good",
-    "sounds good",
-    "let's do it",
-    "order this",
-    "order it"
-  ];
-  if (confirmWords.some(w => normalized === w || normalized.includes(w))) {
-    return { action: "CONFIRM_SELECTION" };
-  }
-
-  // 3. CANCEL_SELECTION
-  const cancelWords = ["cancel", "i changed my mind", "stop", "nevermind", "discard", "cancel order"];
-  if (cancelWords.some(w => normalized === w || normalized.includes(w))) {
-    return { action: "CANCEL_SELECTION" };
-  }
-
-  // 4. REMOVE_UPSELL
-  const removeUpsellWords = [
-    "remove the wrist rest", 
-    "remove wrist rest", 
-    "dont want the wrist rest",
-    "don't want the wrist rest", 
-    "no wrist rest", 
-    "without the wrist rest", 
-    "remove the support", 
-    "without support", 
-    "remove accessory",
-    "drop the accessory",
-    "remove the optional",
-    "drop the support",
-    "drop it",
-    "remove it",
-    "remove"
-  ];
-  if (removeUpsellWords.some(w => normalized.includes(w))) {
-    return { action: "REMOVE_UPSELL" };
-  }
-
-  // 5. REMOVE_PRODUCT
-  const removeProductWords = ["remove the keyboard", "remove keyboard", "remove mouse", "clear basket", "empty basket", "clear cart"];
-  if (removeProductWords.some(w => normalized.includes(w))) {
-    return { action: "REMOVE_PRODUCT" };
-  }
-
-  // 6. REQUEST_CHEAPER_OPTION
-  const cheaperWords = [
-    "make it cheaper",
-    "anything cheaper", 
-    "something cheaper",
-    "cheaper option",
-    "cheaper", 
-    "cheap", 
-    "less price", 
-    "lower price", 
-    "expensive", 
-    "too expensive", 
-    "cheapest",
-    "is there a cheaper"
-  ];
-  if (cheaperWords.some(w => normalized.includes(w))) {
-    return { action: "REQUEST_CHEAPER_OPTION" };
-  }
-
-  // 7. REQUEST_ALTERNATIVE
-  const alternativeWords = [
-    "show me another one",
-    "show another one",
-    "another one",
-    "show alternative",
-    "what else do you have",
-    "other options",
-    "another keyboard",
-    "another mouse",
-    "show more options",
-    "alternative"
-  ];
-  if (alternativeWords.some(w => normalized.includes(w))) {
-    return { action: "REQUEST_ALTERNATIVE" };
-  }
-
-  // 8. REQUEST_EXPLANATION / COMPARISON
   const explanationWords = [
-    "why did you recommend", 
-    "why did you choose", 
-    "why this one", 
-    "why this", 
-    "explain", 
-    "why", 
-    "reason", 
-    "choose", 
     "why choose", 
     "why x instead of y",
     "compare",
