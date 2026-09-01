@@ -809,11 +809,128 @@ export default function Home() {
                               </div>
                               <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400 border-t border-slate-100 pt-1.5">
                                 <span>{cand.product.warranty}</span>
-                                <span>{cand.product.deliveryEstimate}</span>
+                                <button
+                                  onClick={() => sendMessageToAgent(undefined, `select ${cand.product.name}`)}
+                                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                                    isSelected
+                                      ? "bg-indigo-600 text-white"
+                                      : "bg-white border border-slate-200 text-slate-700 hover:bg-indigo-50 hover:text-indigo-600"
+                                  }`}
+                                >
+                                  {isSelected ? "Selected" : "Select this"}
+                                </button>
                               </div>
                             </div>
                           );
                         })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* AXIS ONE • Intelligent Product Comparison Matrix */}
+                  {workflowResponse.productComparison && workflowResponse.productComparison.comparedProducts.length >= 2 && (
+                    <div className="mt-6 pt-5 border-t border-slate-200/80 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-black text-slate-900 tracking-wider uppercase font-mono">
+                            ⚡ AXIS ONE • Comparison Matrix
+                          </span>
+                          <span className="text-[10px] font-bold bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full border border-indigo-100 font-mono">
+                            {workflowResponse.productComparison.comparedProducts.length} Products Analyzed
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Grounded Differences Highlights */}
+                      {workflowResponse.productComparison.differences && workflowResponse.productComparison.differences.length > 0 && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                          {workflowResponse.productComparison.differences.map((diff: any, dIdx: number) => (
+                            <div key={dIdx} className="bg-slate-50 border border-slate-200/70 rounded-xl p-3 text-xs space-y-1">
+                              <span className="font-bold text-slate-900 text-[11px] block font-mono">
+                                {diff.type === "PRICE" ? "💰 " : diff.type === "BATTERY" ? "🔋 " : diff.type === "WARRANTY" ? "🛡️ " : "⚡ "}
+                                {diff.headline}
+                              </span>
+                              <p className="text-[11px] text-slate-500 leading-relaxed">{diff.detail}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Structured Comparison Table */}
+                      <div className="overflow-x-auto border border-slate-200 rounded-xl bg-white">
+                        <table className="w-full text-left text-xs border-collapse">
+                          <thead>
+                            <tr className="bg-slate-50 border-b border-slate-200">
+                              <th className="p-3 font-bold text-slate-600 text-[11px] uppercase tracking-wider font-mono w-1/4">Feature</th>
+                              {workflowResponse.productComparison.comparedProducts.map((pRes: any) => {
+                                const isRec = pRes.product.id === workflowResponse.productComparison.bestOverall?.id;
+                                return (
+                                  <th key={pRes.product.id} className={`p-3 font-mono ${isRec ? "bg-indigo-50/60" : ""}`}>
+                                    <div className="font-extrabold text-slate-900 text-xs">{pRes.product.name}</div>
+                                    <div className="text-[10px] text-slate-500">{pRes.product.merchantName}</div>
+                                    <div className="font-black text-indigo-600 text-xs mt-1">₹{pRes.product.price}</div>
+                                    {isRec && (
+                                      <span className="inline-block mt-1 text-[9px] font-bold bg-indigo-600 text-white px-1.5 py-0.5 rounded">
+                                        Best Match
+                                      </span>
+                                    )}
+                                  </th>
+                                );
+                              })}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 font-mono text-[11px]">
+                            {workflowResponse.productComparison.attributeRows.map((row: any) => (
+                              <tr key={row.attributeKey} className="hover:bg-slate-50/50">
+                                <td className="p-3 font-semibold text-slate-700 bg-slate-50/30">{row.label}</td>
+                                {workflowResponse.productComparison.comparedProducts.map((pRes: any) => {
+                                  const cell = row.values[pRes.product.id] || { displayValue: "—", status: "unavailable" };
+                                  return (
+                                    <td key={pRes.product.id} className="p-3 text-slate-700">
+                                      <div className="flex items-center gap-1.5">
+                                        <span>
+                                          {cell.status === "supported" ? "✓" : cell.status === "limitation" ? "⚠" : "—"}
+                                        </span>
+                                        <span className={cell.status === "supported" ? "font-semibold text-slate-900" : cell.status === "limitation" ? "text-amber-700" : "text-slate-400"}>
+                                          {cell.displayValue}
+                                        </span>
+                                      </div>
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Recommendation & Selection Action Footer */}
+                      <div className="bg-indigo-50/60 border border-indigo-100 rounded-xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+                        <div>
+                          <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest block font-mono">AXIS ONE RECOMMENDATION</span>
+                          <div className="font-extrabold text-slate-900 text-xs mt-0.5">
+                            {workflowResponse.productComparison.bestOverall?.name} ({workflowResponse.productComparison.bestOverall?.merchantName})
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-0.5">{workflowResponse.productComparison.comparisonSummary}</p>
+                        </div>
+                        <div className="flex gap-2 w-full md:w-auto">
+                          {workflowResponse.productComparison.comparedProducts.map((pRes: any) => {
+                            const isCurrent = pRes.product.id === workflowResponse.recommendation.product.id;
+                            return (
+                              <button
+                                key={pRes.product.id}
+                                onClick={() => sendMessageToAgent(undefined, `select ${pRes.product.name}`)}
+                                className={`px-3 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer font-mono ${
+                                  isCurrent
+                                    ? "bg-indigo-600 text-white shadow-xs"
+                                    : "bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
+                                }`}
+                              >
+                                {isCurrent ? `✓ Selected: ${pRes.product.name.split(" ")[0]}` : `Select ${pRes.product.name.split(" ")[0]}`}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
                   )}

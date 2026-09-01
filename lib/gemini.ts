@@ -254,7 +254,7 @@ export async function generateExplanation(
     "4. CONFIRMATION: 1 sentence confirming the basket is locked in for checkout, and directing them to click 'Pay securely via Razorpay' in the right-hand panel.\n" +
     "5. REMOVE_UPSELL / REMOVE_PRODUCT: 1 sentence confirming the removal and stating the updated basket total.\n" +
     "6. CHEAPER_ALTERNATIVE / REQUEST_CHEAPER: 2 sentences naming the cheaper option, merchant name, exact price, savings, and any trade-off.\n" +
-    "7. PRODUCT_COMPARISON: Summarize the distinct offerings from the matched merchants (lowest price merchant, best warranty merchant, and top match).\n" +
+    "7. PRODUCT_COMPARISON: Ground your summary directly on the provided structured comparison data and difference highlights. Accurately state the best overall, cheapest, and best warranty options using exact prices and warranties. NEVER invent missing specifications (if battery life is null, say it is not specified in catalog).\n" +
     "8. Use only the provided facts, prices, warranties, and merchant names. Do not invent features or prices.";
 
   const model = genAI.getGenerativeModel({
@@ -461,6 +461,17 @@ export function generateFallbackExplanation(
 
       case "KEEP_CURRENT_SELECTION": {
         summary = `Understood — keeping your active selection of the ${recommendation.name} (₹${recommendation.price}).`;
+        break;
+      }
+
+      case "PRODUCT_COMPARISON": {
+        if (context.productComparison && context.productComparison.comparedProducts.length > 0) {
+          summary = context.productComparison.comparisonSummary;
+        } else if (merchantComparison && merchantComparison.comparisonText) {
+          summary = merchantComparison.comparisonText;
+        } else {
+          summary = `Here is how the top options compare across stores. The ${recommendation.name} from ${recommendation.merchantName || "merchant"} (₹${recommendation.price}) remains your strongest match.`;
+        }
         break;
       }
 

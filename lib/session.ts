@@ -42,3 +42,6 @@ export function findSessionByRazorpayOrderId(orderId: string): CommerceConversat
 export function clearAllSessions(): void {
   sessionsStore.clear();
 }
+
+export const clearSessionStore = clearAllSessions;
+

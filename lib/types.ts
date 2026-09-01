@@ -131,6 +131,34 @@ export interface MerchantComparisonSummary {
   comparisonText: string;
 }
 
+export interface ProductComparisonAttributeRow {
+  attributeKey: string;
+  label: string;
+  values: Record<string, { displayValue: string; status: "supported" | "unavailable" | "limitation"; numericValue?: number }>;
+  bestProductId?: string;
+  highlightDifference?: string;
+}
+
+export interface ProductComparisonDifference {
+  type: "PRICE" | "BATTERY" | "WARRANTY" | "CONNECTIVITY" | "USE_CASE" | "FEATURE";
+  headline: string;
+  detail: string;
+  winnerProductId?: string;
+}
+
+export interface ProductComparisonData {
+  comparedProducts: RankedResult[];
+  attributeRows: ProductComparisonAttributeRow[];
+  differences: ProductComparisonDifference[];
+  bestOverall: Product;
+  cheapest: Product;
+  bestWarranty: Product;
+  bestMatch: Product;
+  bestForUseCase?: Product;
+  comparisonSummary: string;
+  groundedExplanation: string;
+}
+
 export interface UpsellOpportunity {
   recommendedProduct: Product;
   originalTotal: number;
@@ -189,6 +217,7 @@ export interface ExplanationContext {
   recentMessages?: Array<{ role: "USER" | "AXIS_ONE"; content: string }>;
   merchantComparison?: MerchantComparisonSummary;
   alternativeCandidates?: RankedResult[];
+  productComparison?: ProductComparisonData;
 }
 
 export type ResponseIntent =
@@ -296,6 +325,7 @@ export interface CommerceConversationContext {
   previousBasket?: Product[];
   candidatePool?: RankedResult[];
   merchantComparison?: MerchantComparisonSummary;
+  productComparison?: ProductComparisonData;
   policyStatus?: boolean;
   transactionState: TransactionState;
   pendingAction?: "CONFIRM_CHECKOUT" | "ADD_UPSELL_PROMPT" | "CHEAPER_ALTERNATIVE_PROMPT" | "CLARIFY_REQUIREMENTS" | null;
@@ -323,6 +353,7 @@ export interface WorkflowSuccessResponse {
   recommendation: RankedResult;
   comparisonCandidates?: RankedResult[];
   merchantComparison?: MerchantComparisonSummary;
+  productComparison?: ProductComparisonData;
   upsell: UpsellOpportunity | null;
   basket: {
     items: Product[];
@@ -345,6 +376,7 @@ export interface WorkflowFailureResponse {
   policyValidation?: ValidationResult;
   alternatives: RankedResult[];
   merchantComparison?: MerchantComparisonSummary;
+  productComparison?: ProductComparisonData;
   auditTrail: AuditEvent[];
   explanation?: ExplanationResult;
   sessionId: string;
@@ -359,6 +391,7 @@ export interface ExplanationResult {
   policyExplanation: string;
   summary: string;
   merchantComparisonExplanation?: string;
+  productComparisonExplanation?: string;
   source: "GEMINI" | "FALLBACK";
 }
 

@@ -108,23 +108,28 @@ export function routeConversationalMessage(
   // =========================================================================
   // 3. CONTEXTUAL YES / NO & CANCEL RESOLUTION
   // =========================================================================
-  const isYes = 
-    clean === "yes" || 
-    clean === "yeah" || 
-    clean === "yep" || 
-    clean === "yup" || 
-    clean === "sure" || 
-    clean === "ok" || 
-    clean === "okay" || 
-    clean.includes("yes") || 
-    clean.includes("sounds good") || 
-    clean.includes("let's do it") || 
-    clean.includes("lets do it") || 
-    clean.includes("go ahead") || 
+  const isExplicitConfirm = 
     clean.includes("i'll take it") || 
     clean.includes("ill take it") || 
     clean.includes("take it") || 
-    clean.includes("confirm");
+    clean.includes("confirm") || 
+    clean.includes("buy now") || 
+    clean.includes("let's do it") || 
+    clean.includes("lets do it") || 
+    clean.includes("proceed to checkout") || 
+    clean.includes("proceed to payment");
+
+  const isYes = 
+    isExplicitConfirm ||
+    clean === "yes" || 
+    clean === "yeah" || 
+    clean === "yep" || 
+    clean === "sure" || 
+    clean === "ok" || 
+    clean === "okay" || 
+    clean.startsWith("yes ") || 
+    clean.includes("sounds good") || 
+    clean.includes("go ahead");
 
   const isNo = 
     clean === "no" || 
@@ -138,22 +143,23 @@ export function routeConversationalMessage(
     clean.startsWith("no ");
 
   if (isYes || isNo) {
+    if (isExplicitConfirm) {
+      return {
+        action: "CONFIRM_SELECTION",
+        confidence: 1.0,
+        reasoning: "Explicit affirmative message confirmed basket selection."
+      };
+    }
+
     // Check if the previous message or pending action was asking about upsell
     const isUpsellPrompt = pendingAction === "ADD_UPSELL_PROMPT" || 
-      lastAssistantMsg.includes("wrist support") || 
-      lastAssistantMsg.includes("wrist rest") || 
-      lastAssistantMsg.includes("accessory") ||
-      lastAssistantMsg.includes("add the");
+      /\b(would you like to add|should i add|add this to your basket|add it\?)\b/i.test(lastAssistantMsg);
 
     const isCheaperPrompt = pendingAction === "CHEAPER_ALTERNATIVE_PROMPT" || 
-      lastAssistantMsg.includes("cheaper alternative") || 
-      lastAssistantMsg.includes("switch to");
+      /\b(would you prefer the cheaper|switch to the cheaper)\b/i.test(lastAssistantMsg);
 
     const isCheckoutPrompt = pendingAction === "CONFIRM_CHECKOUT" || 
-      lastAssistantMsg.includes("checkout") || 
-      lastAssistantMsg.includes("ready for checkout") || 
-      lastAssistantMsg.includes("proceed to payment") ||
-      lastAssistantMsg.includes("proceed?");
+      /\b(ready for checkout|proceed to payment|proceed\?)\b/i.test(lastAssistantMsg);
 
     if (isUpsellPrompt) {
       if (isYes) {
@@ -255,27 +261,45 @@ export function routeConversationalMessage(
   }
 
   // =========================================================================
-  // 6. MERCHANT & PRODUCT COMPARISON ("compare", "which merchant is cheaper?")
+  // 6. PRODUCT & MERCHANT COMPARISON
+  // ("compare", "what is the difference", "which is better", "which has better battery", "which is better for programming")
   // =========================================================================
   if (
-    /^(compare|compare\?|compare these|compare options|which merchant has the best option|which merchant has the best option\?|which merchant is better|which merchant is cheaper|which merchant is cheaper\?|which one has better warranty|which one has better warranty\?|show me options from different stores|show options from different stores|is there a better deal|is there a better deal\?|compare stores|merchant comparison)\??$/i.test(normalized) ||
-    normalized.includes("compare") ||
-    normalized.includes("which merchant") ||
-    normalized.includes("different stores") ||
-    normalized.includes("better warranty") ||
-    normalized.includes("better deal")
+    clean.includes("compare") ||
+    clean.includes("difference") ||
+    clean.includes("differences") ||
+    clean.includes("which is better") ||
+    clean.includes("which one is better") ||
+    clean.includes("which should i buy") ||
+    clean.includes("which should i choose") ||
+    clean.includes("which one should i buy") ||
+    clean.includes("which one should i choose") ||
+    clean.includes("which is cheaper") ||
+    clean.includes("which one is cheaper") ||
+    clean.includes("better battery") ||
+    clean.includes("better warranty") ||
+    clean.includes("better for programming") ||
+    clean.includes("better for gaming") ||
+    clean.includes("better for office") ||
+    clean.includes("which merchant") ||
+    clean.includes("different stores") ||
+    clean.includes("better deal") ||
+    clean === "better" ||
+    clean === "better?" ||
+    clean === "cheapest" ||
+    clean === "cheapest?"
   ) {
     return {
       action: "PRODUCT_COMPARISON",
       confidence: 1.0,
-      reasoning: "User requested cross-merchant product comparison."
+      reasoning: "User requested intelligent product comparison."
     };
   }
 
   // =========================================================================
   // 7. PAYMENT & CHECKOUT GUIDANCE ("payment", "checkout", "how to pay")
   // =========================================================================
-  if (/^(payment|checkout|pay|how to pay|how do i pay|pay now|proceed to checkout|proceed to pay|payment options|payment methods)\??$/i.test(normalized)) {
+  if (/^(payment|checkout|pay|how to pay|how do i pay|pay now|proceed to checkout|proceed to pay|payment options|payment methods)\??$/i.test(clean)) {
     return {
       action: "PAYMENT_GUIDANCE",
       confidence: 1.0,
@@ -287,9 +311,8 @@ export function routeConversationalMessage(
   // 8. ITEM REMOVAL ("remove it", "remove that", "drop accessory", "remove wrist rest")
   // =========================================================================
   if (
-    /^(remove it|remove that|drop it|remove accessory|drop accessory|remove the accessory|remove the wrist rest|remove wrist rest|remove the support|remove support|dont want the accessory|no accessory|take it off)$/i.test(normalized)
+    /^(remove it|remove that|drop it|remove accessory|drop accessory|remove the accessory|remove the wrist rest|remove wrist rest|remove the support|remove support|dont want the accessory|no accessory|take it off)$/i.test(clean)
   ) {
-    // If an upsell item is currently in the basket or context
     if (context?.currentUpsell || activeBasket.length > 1) {
       return {
         action: "REMOVE_UPSELL",
@@ -305,17 +328,37 @@ export function routeConversationalMessage(
   }
 
   // =========================================================================
-  // 9. REFERENCES & ORDINALS ("the cheaper one", "the first one", "this one", "that one")
+  // 9. REFERENCES, ORDINALS & SELECTIONS FROM COMPARISON
+  // ("the first one", "the second one", "choose the first one", "take KeyForge", "select NovaKey", "I'll go with the cheaper one")
   // =========================================================================
-  if (/^(the cheaper one|cheaper one|pick the cheaper one|select the cheaper one)$/i.test(normalized)) {
+  if (
+    clean.includes("the cheaper one") || 
+    clean.includes("cheaper one") || 
+    clean.includes("pick the cheaper") || 
+    clean.includes("select the cheaper") ||
+    clean.includes("go with the cheaper")
+  ) {
     return {
       action: "REQUEST_CHEAPER_OPTION",
       confidence: 1.0,
-      reasoning: "User selected the cheaper option via ordinal reference."
+      reasoning: "User selected the cheaper option via reference."
     };
   }
 
-  if (/^(the first one|first one|option 1|rank 1|#1|the first)$/i.test(normalized)) {
+  if (
+    clean === "first" ||
+    clean === "the first" ||
+    clean === "first one" ||
+    clean === "the first one" ||
+    clean.includes("choose the first") ||
+    clean.includes("select the first") ||
+    clean.includes("take the first") ||
+    clean.includes("i'll take the first") ||
+    clean.includes("ill take the first") ||
+    clean === "option 1" ||
+    clean === "rank 1" ||
+    clean === "#1"
+  ) {
     return {
       action: "CONFIRM_REFERENCED_PRODUCT",
       targetCandidateIndex: 0,
@@ -324,7 +367,20 @@ export function routeConversationalMessage(
     };
   }
 
-  if (/^(the second one|second one|option 2|rank 2|#2|the second)$/i.test(normalized)) {
+  if (
+    clean === "second" ||
+    clean === "the second" ||
+    clean === "second one" ||
+    clean === "the second one" ||
+    clean.includes("choose the second") ||
+    clean.includes("select the second") ||
+    clean.includes("take the second") ||
+    clean.includes("i'll take the second") ||
+    clean.includes("ill take the second") ||
+    clean === "option 2" ||
+    clean === "rank 2" ||
+    clean === "#2"
+  ) {
     return {
       action: "CONFIRM_REFERENCED_PRODUCT",
       targetCandidateIndex: 1,
@@ -333,13 +389,53 @@ export function routeConversationalMessage(
     };
   }
 
-  if (/^(the third one|third one|option 3|rank 3|#3|the third)$/i.test(normalized)) {
+  if (
+    clean === "third" ||
+    clean === "the third" ||
+    clean === "third one" ||
+    clean === "the third one" ||
+    clean.includes("choose the third") ||
+    clean.includes("select the third") ||
+    clean.includes("take the third") ||
+    clean.includes("i'll take the third") ||
+    clean.includes("ill take the third") ||
+    clean === "option 3" ||
+    clean === "rank 3" ||
+    clean === "#3"
+  ) {
     return {
       action: "CONFIRM_REFERENCED_PRODUCT",
       targetCandidateIndex: 2,
       confidence: 1.0,
       reasoning: "User selected candidate index 2 (the third one)."
     };
+  }
+
+  // Explicit Selection by Name: "select NovaKey", "take KeyForge", "choose Pulse", "select Apex"
+  if (
+    clean.startsWith("select ") || 
+    clean.startsWith("take ") || 
+    clean.startsWith("choose ") || 
+    clean.startsWith("pick ") ||
+    clean.startsWith("i'll take ") ||
+    clean.startsWith("ill take ")
+  ) {
+    const rawTarget = clean.replace(/^(select|take|choose|pick|i'll take|ill take)\s+(the\s+)?/i, "").trim();
+    const all = getAllProducts();
+    const matched = all.find(p => 
+      p.name.toLowerCase().includes(rawTarget) || 
+      p.id.toLowerCase().includes(rawTarget) ||
+      rawTarget.split(/\s+/).some(part => part.length >= 4 && p.name.toLowerCase().includes(part))
+    );
+
+    if (matched) {
+      return {
+        action: "CONFIRM_REFERENCED_PRODUCT",
+        targetProductId: matched.id,
+        confidence: 1.0,
+        reasoning: `User explicitly selected product ${matched.name}.`
+      };
+    }
   }
 
   if (/^(this one|that one|i'll take this one|i'll take that one|select this|select that|this keyboard|that keyboard)$/i.test(normalized)) {

@@ -29,11 +29,12 @@ import {
 } from "./gemini";
 import { routeConversationalMessage } from "./conversationRouter";
 import { buildMerchantComparison } from "./merchantComparison";
+import { resolveComparisonCandidates, buildProductComparison } from "./productComparison";
 import { getSession, saveSession, generateSessionId } from "./session";
 
 /**
  * Orchestrates the complete multi-merchant AI Buyer commerce workflow,
- * supporting conversational routing, ordinal references, and follow-up requests.
+ * supporting conversational routing, ordinal references, product comparisons, and follow-up requests.
  */
 export async function runAgentWorkflow(
   message: string,
@@ -55,6 +56,7 @@ export async function runAgentWorkflow(
   let explanation: ExplanationResult;
   let comparisonCandidates: RankedResult[] = [];
   let merchantComparison: MerchantComparisonSummary | undefined;
+  let productComparison: ProductComparisonData | undefined;
 
   // Check if we seek the custom Apex Pro X discount test
   if (message.includes("6,999") && (message.includes("5,000") || message.includes("5000"))) {
@@ -196,12 +198,74 @@ export async function runAgentWorkflow(
 
     else if (classificationAction === "PRODUCT_COMPARISON") {
       const intentToUse = session.latestIntent || session.originalIntent;
-      const candidates = searchProducts(intentToUse);
-      const rankedPool = rankProducts(candidates, intentToUse);
-      comparisonCandidates = rankedPool.slice(0, 4);
-      merchantComparison = buildMerchantComparison(rankedPool, session.recommendedProduct);
+      const resolved = resolveComparisonCandidates(message, session);
 
-      recommendation = rankedPool.find(r => r.product.id === session?.recommendedProduct?.id) || rankedPool[0] || {
+      if (!resolved || resolved.candidates.length === 0) {
+        return {
+          success: false,
+          stage: "CATALOG_SEARCH",
+          message: "No comparable products are currently available for those requirements.",
+          alternatives: [],
+          auditTrail: getAuditTrail(),
+          explanation: {
+            recommendationExplanation: "No comparable products are currently available for those requirements.",
+            upsellExplanation: "",
+            budgetExplanation: "",
+            policyExplanation: "",
+            summary: "No comparable products are currently available for those requirements.",
+            source: "FALLBACK"
+          },
+          sessionId: activeSessionId!,
+          conversationAction: classificationAction,
+          transactionState: session.transactionState
+        };
+      }
+
+      if (resolved.candidates.length === 1) {
+        const onlyCandidate = resolved.candidates[0];
+        const singleMsg = "I only have one valid option for your current requirements. I can search other merchants for alternatives if you'd like.";
+        return {
+          success: true,
+          message: singleMsg,
+          intent: intentToUse,
+          recommendation: onlyCandidate,
+          upsell: session.currentUpsell ? {
+            recommendedProduct: session.currentUpsell,
+            originalTotal: onlyCandidate.product.price,
+            upsellAmount: session.currentUpsell.price,
+            newTotal: onlyCandidate.product.price + session.currentUpsell.price,
+            remainingBudget: 0,
+            relevanceScore: 100,
+            reasoning: "Retained from session.",
+            approved: true
+          } : null,
+          basket: {
+            items: session.currentBasket,
+            originalTotal: session.currentBasket.reduce((sum, p) => sum + p.price, 0),
+            requestedDiscount,
+            finalAmount: session.currentBasket.reduce((sum, p) => sum + p.price, 0)
+          },
+          policyValidation: validateTransaction(session.currentBasket, intentToUse.budget ?? 999999, requestedDiscount),
+          transactionState: session.transactionState,
+          auditTrail: getAuditTrail(),
+          explanation: {
+            recommendationExplanation: singleMsg,
+            upsellExplanation: "",
+            budgetExplanation: "",
+            policyExplanation: "",
+            summary: singleMsg,
+            source: "FALLBACK"
+          },
+          sessionId: activeSessionId!,
+          conversationAction: classificationAction
+        };
+      }
+
+      comparisonCandidates = resolved.candidates;
+      productComparison = buildProductComparison(comparisonCandidates, intentToUse);
+      merchantComparison = buildMerchantComparison(comparisonCandidates, session.recommendedProduct);
+
+      recommendation = comparisonCandidates.find(r => r.product.id === session?.recommendedProduct?.id) || comparisonCandidates[0] || {
         product: session.recommendedProduct || getAllProducts()[0],
         matchScore: 100,
         matchedCriteria: [],
@@ -229,8 +293,8 @@ export async function runAgentWorkflow(
         eventType: "MERCHANT_COMPARED",
         actor: "AXIS_ONE",
         status: "SUCCESS",
-        summary: `Multi-merchant comparison executed across ${merchantComparison.merchantCount} merchants.`,
-        details: { merchantCount: merchantComparison.merchantCount, candidateCount: merchantComparison.candidateCount }
+        summary: `Intelligent product comparison executed across ${comparisonCandidates.length} products.`,
+        details: { candidates: comparisonCandidates.map(c => c.product.name), resolutionNote: resolved.resolutionNote }
       });
     }
 
@@ -238,11 +302,21 @@ export async function runAgentWorkflow(
       const intentToUse = session.latestIntent || session.originalIntent;
       let targetProduct: Product | undefined;
 
-      if (targetIndex !== undefined && session.candidatePool && session.candidatePool[targetIndex]) {
-        targetProduct = session.candidatePool[targetIndex].product;
-      } else if (session.candidatePool && session.candidatePool.length > 0) {
+      if (fastRoute.targetProductId) {
+        targetProduct = getAllProducts().find(p => p.id === fastRoute.targetProductId);
+      } else if (targetIndex !== undefined) {
+        if (session.productComparison?.comparedProducts && session.productComparison.comparedProducts[targetIndex]) {
+          targetProduct = session.productComparison.comparedProducts[targetIndex].product;
+        } else if (session.candidatePool && session.candidatePool[targetIndex]) {
+          targetProduct = session.candidatePool[targetIndex].product;
+        }
+      }
+
+      if (!targetProduct && session.candidatePool && session.candidatePool.length > 0) {
         targetProduct = session.candidatePool[0].product;
-      } else {
+      }
+
+      if (!targetProduct) {
         const candidates = searchProducts(intentToUse);
         const rankedPool = rankProducts(candidates, intentToUse);
         targetProduct = rankedPool[targetIndex || 0]?.product || session.recommendedProduct;
@@ -710,7 +784,8 @@ export async function runAgentWorkflow(
       transactionState,
       responseIntent: derivedIntent,
       recentMessages: session.recentMessages,
-      merchantComparison
+      merchantComparison,
+      productComparison: productComparison || session.productComparison
     };
 
     if (directMsg) {
@@ -765,6 +840,7 @@ export async function runAgentWorkflow(
     session.tradeoffs = explanationContext.tradeoffs;
     session.candidatePool = comparisonCandidates.length > 0 ? comparisonCandidates : session.candidatePool;
     session.merchantComparison = merchantComparison || session.merchantComparison;
+    session.productComparison = productComparison || session.productComparison;
     saveSession(session);
 
     return {
@@ -774,6 +850,7 @@ export async function runAgentWorkflow(
       recommendation,
       comparisonCandidates: comparisonCandidates.length > 0 ? comparisonCandidates : session.candidatePool,
       merchantComparison: merchantComparison || session.merchantComparison,
+      productComparison: productComparison || session.productComparison,
       upsell,
       basket: {
         items: basketItems,
@@ -1089,6 +1166,8 @@ async function executeWorkflowWithIntent(
     existingSession?.recentMessages
   );
 
+  const initialProductComparison = ranked.length >= 2 ? buildProductComparison(ranked.slice(0, 3), intent) : undefined;
+
   const explanationContext: ExplanationContext = {
     intent,
     originalRequirements: existingSession ? existingSession.originalIntent : intent,
@@ -1128,7 +1207,8 @@ async function executeWorkflowWithIntent(
     transactionState,
     responseIntent: derivedIntent,
     recentMessages: existingSession?.recentMessages,
-    merchantComparison
+    merchantComparison,
+    productComparison: initialProductComparison
   };
 
   let explanation: ExplanationResult;
@@ -1174,7 +1254,8 @@ async function executeWorkflowWithIntent(
     lastUserQuery: userMessage,
     tradeoffs: explanationContext.tradeoffs,
     candidatePool: ranked,
-    merchantComparison
+    merchantComparison,
+    productComparison: initialProductComparison
   } : {
     sessionId,
     originalIntent: intent,
@@ -1198,7 +1279,8 @@ async function executeWorkflowWithIntent(
     lastUserQuery: userMessage,
     tradeoffs: explanationContext.tradeoffs,
     candidatePool: ranked,
-    merchantComparison
+    merchantComparison,
+    productComparison: initialProductComparison
   };
 
   if (userMessage) {
@@ -1216,6 +1298,7 @@ async function executeWorkflowWithIntent(
       recommendation,
       comparisonCandidates: ranked.slice(0, 4),
       merchantComparison,
+      productComparison: initialProductComparison,
       upsell,
       basket: {
         items: basketItems,
@@ -1238,6 +1321,7 @@ async function executeWorkflowWithIntent(
       policyValidation,
       alternatives: ranked.slice(1),
       merchantComparison,
+      productComparison: initialProductComparison,
       auditTrail: getAuditTrail(),
       explanation,
       sessionId,
