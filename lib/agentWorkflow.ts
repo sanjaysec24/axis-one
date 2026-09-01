@@ -13,7 +13,8 @@ import {
   CommerceConversationContext, 
   TransactionState,
   ResponseIntent,
-  MerchantComparisonSummary
+  MerchantComparisonSummary,
+  ProductComparisonData
 } from "./types";
 import { getAllProducts, getProductById, searchProducts, isCategoryMatch } from "./catalog";
 import { rankProducts } from "./ranking";
@@ -30,6 +31,12 @@ import {
 import { routeConversationalMessage } from "./conversationRouter";
 import { buildMerchantComparison } from "./merchantComparison";
 import { resolveComparisonCandidates, buildProductComparison } from "./productComparison";
+import { 
+  buildAgentActivities, 
+  buildDecisionSummary, 
+  getStandardTrustControls, 
+  updateDecisionHistory 
+} from "./agentDecision";
 import { getSession, saveSession, generateSessionId } from "./session";
 
 /**
@@ -821,6 +828,44 @@ export async function runAgentWorkflow(
       details: { explanation }
     });
 
+    const updatedDecisionHistory = updateDecisionHistory(
+      session.decisionHistory,
+      classificationAction === "CONFIRM_SELECTION" 
+        ? "User Confirmed Selection" 
+        : (classificationAction === "PRODUCT_COMPARISON" 
+            ? "Comparison Requested" 
+            : (classificationAction === "REQUEST_CHEAPER_OPTION" 
+                ? "Cheaper Option Requested" 
+                : (classificationAction === "CONFIRM_REFERENCED_PRODUCT"
+                    ? "Candidate Selected"
+                    : "Product Recommendation"))),
+      recommendation.product,
+      `Selected ${recommendation.product.name} (₹${recommendation.product.price}) from ${recommendation.product.merchantName || 'merchant'}`
+    );
+
+    const agentActivities = buildAgentActivities({
+      intent: session.latestIntent || session.originalIntent,
+      recommendation,
+      candidateCount: (comparisonCandidates.length > 0 ? comparisonCandidates : (session.candidatePool || [recommendation])).length,
+      policyValidation,
+      transactionState,
+      comparisonExecuted: classificationAction === "PRODUCT_COMPARISON" || !!productComparison,
+      basketTotal: policyValidation.finalAmount
+    });
+
+    const decisionSummary = buildDecisionSummary({
+      intent: session.latestIntent || session.originalIntent,
+      recommendation,
+      allProducts: getAllProducts(),
+      candidates: comparisonCandidates.length > 0 ? comparisonCandidates : (session.candidatePool || [recommendation]),
+      policyValidation,
+      transactionState,
+      tradeoffs: explanationContext.tradeoffs,
+      decisionHistory: updatedDecisionHistory
+    });
+
+    const trustControls = getStandardTrustControls();
+
     session.recentMessages.push({ role: "USER", content: message });
     session.recentMessages.push({ role: "AXIS_ONE", content: explanation.summary });
     session.conversationHistory = session.recentMessages;
@@ -841,6 +886,10 @@ export async function runAgentWorkflow(
     session.candidatePool = comparisonCandidates.length > 0 ? comparisonCandidates : session.candidatePool;
     session.merchantComparison = merchantComparison || session.merchantComparison;
     session.productComparison = productComparison || session.productComparison;
+    session.agentActivities = agentActivities;
+    session.decisionSummary = decisionSummary;
+    session.trustControls = trustControls;
+    session.decisionHistory = updatedDecisionHistory;
     saveSession(session);
 
     return {
@@ -851,6 +900,10 @@ export async function runAgentWorkflow(
       comparisonCandidates: comparisonCandidates.length > 0 ? comparisonCandidates : session.candidatePool,
       merchantComparison: merchantComparison || session.merchantComparison,
       productComparison: productComparison || session.productComparison,
+      agentActivities,
+      decisionSummary,
+      trustControls,
+      decisionHistory: updatedDecisionHistory,
       upsell,
       basket: {
         items: basketItems,
@@ -868,7 +921,7 @@ export async function runAgentWorkflow(
 
   } else {
     // Start fresh workflow
-    activeSessionId = generateSessionId();
+    activeSessionId = sessionId || generateSessionId();
 
     // Check fast router on new session without history
     if (fastRoute.action === "GREETING" || fastRoute.action === "THANKS" || fastRoute.action === "FAREWELL" || fastRoute.action === "CLARIFICATION_REQUIRED") {
@@ -1234,6 +1287,36 @@ async function executeWorkflowWithIntent(
     details: { explanation }
   });
 
+  const initialDecisionHistory = updateDecisionHistory(
+    existingSession?.decisionHistory,
+    "Product Recommendation",
+    recommendation.product,
+    `Recommended ${recommendation.product.name} (₹${recommendation.product.price}) from ${recommendation.product.merchantName || 'merchant'}`
+  );
+
+  const agentActivities = buildAgentActivities({
+    intent,
+    recommendation,
+    candidateCount: ranked.length,
+    policyValidation,
+    transactionState,
+    comparisonExecuted: !!initialProductComparison,
+    basketTotal: policyValidation.finalAmount
+  });
+
+  const decisionSummary = buildDecisionSummary({
+    intent,
+    recommendation,
+    allProducts: getAllProducts(),
+    candidates: ranked,
+    policyValidation,
+    transactionState,
+    tradeoffs: explanationContext.tradeoffs,
+    decisionHistory: initialDecisionHistory
+  });
+
+  const trustControls = getStandardTrustControls();
+
   // Save session context
   const sessionToSave: CommerceConversationContext = existingSession ? {
     ...existingSession,
@@ -1255,7 +1338,11 @@ async function executeWorkflowWithIntent(
     tradeoffs: explanationContext.tradeoffs,
     candidatePool: ranked,
     merchantComparison,
-    productComparison: initialProductComparison
+    productComparison: initialProductComparison,
+    agentActivities,
+    decisionSummary,
+    trustControls,
+    decisionHistory: initialDecisionHistory
   } : {
     sessionId,
     originalIntent: intent,
@@ -1280,7 +1367,11 @@ async function executeWorkflowWithIntent(
     tradeoffs: explanationContext.tradeoffs,
     candidatePool: ranked,
     merchantComparison,
-    productComparison: initialProductComparison
+    productComparison: initialProductComparison,
+    agentActivities,
+    decisionSummary,
+    trustControls,
+    decisionHistory: initialDecisionHistory
   };
 
   if (userMessage) {
@@ -1299,6 +1390,10 @@ async function executeWorkflowWithIntent(
       comparisonCandidates: ranked.slice(0, 4),
       merchantComparison,
       productComparison: initialProductComparison,
+      agentActivities,
+      decisionSummary,
+      trustControls,
+      decisionHistory: initialDecisionHistory,
       upsell,
       basket: {
         items: basketItems,
@@ -1322,6 +1417,10 @@ async function executeWorkflowWithIntent(
       alternatives: ranked.slice(1),
       merchantComparison,
       productComparison: initialProductComparison,
+      agentActivities,
+      decisionSummary,
+      trustControls,
+      decisionHistory: initialDecisionHistory,
       auditTrail: getAuditTrail(),
       explanation,
       sessionId,

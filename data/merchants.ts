@@ -146,3 +146,6 @@ export function getAllMerchants(): Merchant[] {
   return merchants;
 }
 
+export const DEMO_MERCHANTS = merchants;
+
+

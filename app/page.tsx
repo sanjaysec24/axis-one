@@ -935,6 +935,200 @@ export default function Home() {
                     </div>
                   )}
 
+                  {/* AXIS ONE • Agent Decision Visibility & Activity Timeline */}
+                  {workflowResponse.agentActivities && workflowResponse.agentActivities.length > 0 && (
+                    <div className="mt-6 pt-5 border-t border-slate-200/80 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black text-slate-900 tracking-wider uppercase font-mono flex items-center gap-1.5">
+                          🛡️ AXIS ONE • Agent Activity Timeline
+                        </span>
+                        <span className="text-[10px] font-bold bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full border border-indigo-100 font-mono">
+                          {workflowResponse.agentActivities.filter((a: any) => a.status === "COMPLETED").length}/{workflowResponse.agentActivities.length} Stages Verified
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                        {workflowResponse.agentActivities.map((activity: any) => {
+                          const isComplete = activity.status === "COMPLETED";
+                          const isWarning = activity.status === "WARNING";
+                          const isBlocked = activity.status === "BLOCKED";
+                          const isPending = activity.status === "IN_PROGRESS" || activity.status === "PENDING";
+                          
+                          return (
+                            <div 
+                              key={activity.id}
+                              className={`p-3 rounded-xl border font-mono text-xs transition-all ${
+                                isBlocked 
+                                  ? "bg-rose-50/70 border-rose-200 text-rose-900"
+                                  : isWarning
+                                    ? "bg-amber-50/70 border-amber-200 text-amber-900"
+                                    : isComplete
+                                      ? "bg-slate-50 border-slate-200/70 text-slate-800"
+                                      : "bg-indigo-50/40 border-indigo-200 text-indigo-900"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-extrabold text-[11px] block text-slate-900">
+                                  {isComplete ? "✓ " : isBlocked ? "✕ " : isWarning ? "⚠ " : "🔒 "}
+                                  {activity.title}
+                                </span>
+                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${
+                                  isBlocked 
+                                    ? "bg-rose-100 text-rose-700"
+                                    : isWarning 
+                                      ? "bg-amber-100 text-amber-700" 
+                                      : isComplete 
+                                        ? "bg-emerald-100 text-emerald-700" 
+                                        : "bg-indigo-100 text-indigo-700"
+                                }`}>
+                                  {activity.status}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">{activity.summary}</p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* AXIS ONE • Decision Summary & Why Selected */}
+                  {workflowResponse.decisionSummary && (
+                    <div className="mt-6 pt-5 border-t border-slate-200/80 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black text-slate-900 tracking-wider uppercase font-mono">
+                          🎯 Why AXIS ONE Selected This
+                        </span>
+                        <span className="text-[10px] font-mono text-slate-400">
+                          {workflowResponse.decisionSummary.productsEvaluated} products scanned across {workflowResponse.decisionSummary.merchantsEvaluated} merchants
+                        </span>
+                      </div>
+
+                      {/* Decision Factors Grid */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                        {workflowResponse.decisionSummary.decisionFactors.map((factor: any, fIdx: number) => (
+                          <div key={fIdx} className="bg-slate-50 border border-slate-200/60 rounded-xl p-3 text-xs space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-slate-900 font-mono text-[11px]">
+                                {factor.status === "positive" ? "✓ " : factor.status === "tradeoff" ? "⚖️ " : "ℹ️ "}
+                                {factor.factor}
+                              </span>
+                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded font-mono ${
+                                factor.status === "positive" ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-700"
+                              }`}>
+                                {factor.status}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-500 leading-relaxed font-sans">{factor.detail}</p>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Guardrails Overview Cards */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 font-mono text-xs pt-1">
+                        {/* Budget Guardrail */}
+                        <div className="bg-slate-50 border border-slate-200/70 p-3 rounded-xl space-y-1">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Budget Guardrail</span>
+                          <div className="flex justify-between items-center">
+                            <span className="font-extrabold text-slate-900">₹{workflowResponse.decisionSummary.basketTotal}</span>
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                              workflowResponse.decisionSummary.budgetStatus === "WITHIN_BUDGET" 
+                                ? "bg-emerald-50 text-emerald-600" 
+                                : "bg-rose-50 text-rose-600"
+                            }`}>
+                              {workflowResponse.decisionSummary.budgetStatus === "WITHIN_BUDGET" ? "✓ Within Budget" : "⚠ Exceeded"}
+                            </span>
+                          </div>
+                          {workflowResponse.decisionSummary.userLimit && (
+                            <span className="text-[10px] text-slate-400 block">Limit: ₹{workflowResponse.decisionSummary.userLimit} (₹{workflowResponse.decisionSummary.remainingBudget || 0} remaining)</span>
+                          )}
+                        </div>
+
+                        {/* Inventory Guardrail */}
+                        <div className="bg-slate-50 border border-slate-200/70 p-3 rounded-xl space-y-1">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Inventory Guardrail</span>
+                          <div className="flex justify-between items-center">
+                            <span className="font-extrabold text-slate-900">{workflowResponse.recommendation.product.stock} Units</span>
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                              workflowResponse.decisionSummary.inventoryStatus === "AVAILABLE" 
+                                ? "bg-emerald-50 text-emerald-600" 
+                                : "bg-amber-50 text-amber-700"
+                            }`}>
+                              {workflowResponse.decisionSummary.inventoryStatus}
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-slate-400 block">Verified with {workflowResponse.recommendation.product.merchantName || "store"}</span>
+                        </div>
+
+                        {/* Policy Guardrail */}
+                        <div className="bg-slate-50 border border-slate-200/70 p-3 rounded-xl space-y-1">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Policy Guardrail</span>
+                          <div className="flex justify-between items-center">
+                            <span className="font-extrabold text-slate-900">{workflowResponse.policyValidation.approved ? "Compliant" : "Blocked"}</span>
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                              workflowResponse.decisionSummary.policyStatus === "VALID" 
+                                ? "bg-emerald-50 text-emerald-600" 
+                                : "bg-rose-50 text-rose-600"
+                            }`}>
+                              {workflowResponse.decisionSummary.policyStatus === "VALID" ? "✓ Purchase Allowed" : "✕ Blocked"}
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-slate-400 block">{workflowResponse.policyValidation.checks.length} compliance checks evaluated</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* AXIS ONE • Decision History Log */}
+                  {workflowResponse.decisionHistory && workflowResponse.decisionHistory.length > 1 && (
+                    <div className="mt-6 pt-5 border-t border-slate-200/80 space-y-2.5">
+                      <span className="text-xs font-black text-slate-900 tracking-wider uppercase font-mono block">
+                        📜 Decision History (Audit Log)
+                      </span>
+                      <div className="space-y-1.5 font-mono text-[11px]">
+                        {workflowResponse.decisionHistory.map((step: any) => (
+                          <div key={step.stepNumber} className="bg-slate-50 border border-slate-200/50 p-2.5 rounded-lg flex justify-between items-center">
+                            <div>
+                              <span className="font-bold text-indigo-600 mr-2">Step {step.stepNumber}:</span>
+                              <span className="font-semibold text-slate-800">{step.actionTitle}</span>
+                              {step.productName && <span className="text-slate-500 ml-1.5">— {step.productName} (₹{step.price})</span>}
+                            </div>
+                            <span className="text-[10px] text-slate-400">{new Date(step.timestamp).toLocaleTimeString()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* AXIS ONE • Trust & Controls Guarantee Panel */}
+                  {workflowResponse.trustControls && (
+                    <div className="mt-6 pt-5 border-t border-slate-200/80 space-y-3">
+                      <span className="text-xs font-black text-slate-900 tracking-wider uppercase font-mono block">
+                        🔒 AXIS ONE Trust & Safety Controls
+                      </span>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 font-mono text-[11px]">
+                        <div className="bg-slate-50/80 border border-slate-200/60 p-3 rounded-xl space-y-1.5">
+                          <strong className="text-slate-900 block text-xs">Decision Controls</strong>
+                          {workflowResponse.trustControls.decisionControls.slice(0, 3).map((c: string, idx: number) => (
+                            <div key={idx} className="text-slate-600 text-[10px] leading-relaxed">• {c}</div>
+                          ))}
+                        </div>
+                        <div className="bg-slate-50/80 border border-slate-200/60 p-3 rounded-xl space-y-1.5">
+                          <strong className="text-slate-900 block text-xs">Payment Controls</strong>
+                          {workflowResponse.trustControls.paymentControls.slice(0, 3).map((c: string, idx: number) => (
+                            <div key={idx} className="text-slate-600 text-[10px] leading-relaxed">• {c}</div>
+                          ))}
+                        </div>
+                        <div className="bg-slate-50/80 border border-slate-200/60 p-3 rounded-xl space-y-1.5">
+                          <strong className="text-slate-900 block text-xs">Persistence Controls</strong>
+                          {workflowResponse.trustControls.persistenceControls.slice(0, 3).map((c: string, idx: number) => (
+                            <div key={idx} className="text-slate-600 text-[10px] leading-relaxed">• {c}</div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Display tradeoffs if applicable */}
                   {workflowResponse.tradeoffs && workflowResponse.tradeoffs.length > 0 && (
                     <div className="bg-amber-50 border border-amber-200/60 rounded-xl p-3.5 text-xs text-amber-700 font-mono flex items-start gap-2.5">
@@ -1385,15 +1579,47 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* Action Buttons & Status for Payment Flow */}
+                  {/* User Authorization Barrier before USER_CONFIRMED */}
+                  {["EXPLORING", "AWAITING_USER_APPROVAL", "UPDATED"].includes(workflowResponse.transactionState) && (
+                    <div className="pt-2 space-y-2 font-mono">
+                      <div className="bg-amber-50/80 border border-amber-200/80 rounded-xl p-3.5 text-xs space-y-2 text-amber-900">
+                        <div className="flex items-center gap-1.5 font-bold text-[11px] uppercase tracking-wider text-amber-800">
+                          <svg className="h-4 w-4 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                          </svg>
+                          <span>🔒 Payment Not Authorized</span>
+                        </div>
+                        <p className="text-[11px] text-amber-700 leading-relaxed font-sans">
+                          AXIS ONE requires your explicit authorization before checkout. Say <strong className="text-slate-900 font-mono">"Okay, I'll take it"</strong> in chat or click below to authorize.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => sendMessageToAgent(undefined, "Okay, I'll take it.")}
+                          className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 rounded-lg text-xs transition-colors shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
+                        >
+                          <span>✓ Authorize & Lock Selection</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Action Buttons & Status for Payment Flow (Unlocked upon USER_CONFIRMED) */}
                   {["USER_CONFIRMED", "PAYMENT_PENDING", "PAYMENT_PROCESSING", "PAYMENT_FAILED", "PAYMENT_CANCELLED"].includes(workflowResponse.transactionState) && (
                     <div className="pt-2 space-y-2 font-mono">
+                      {workflowResponse.transactionState === "USER_CONFIRMED" && (
+                        <div className="bg-emerald-50/80 border border-emerald-200/80 rounded-xl p-3 text-xs font-mono text-emerald-800 space-y-0.5">
+                          <div className="flex items-center gap-1.5 font-extrabold text-[11px] uppercase tracking-wider">
+                            <span>✓ User Approval Received</span>
+                          </div>
+                          <p className="text-[11px] text-emerald-700 font-sans">Basket locked in. Payment checkout authorization is now active.</p>
+                        </div>
+                      )}
+
                       <div className="text-[10px] text-slate-400">
                         {workflowResponse.transactionState === "PAYMENT_PROCESSING" && "🔄 Validating verification signature..."}
                         {workflowResponse.transactionState === "PAYMENT_PENDING" && "⏳ Order pending payment checkout..."}
                         {workflowResponse.transactionState === "PAYMENT_FAILED" && "❌ Payment declined or failed."}
                         {workflowResponse.transactionState === "PAYMENT_CANCELLED" && "⚠️ Checkout cancelled by buyer."}
-                        {workflowResponse.transactionState === "USER_CONFIRMED" && "✓ Selection confirmed by buyer."}
                       </div>
 
                       <button
@@ -1405,7 +1631,7 @@ export default function Home() {
                             ? "bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200"
                             : ["PAYMENT_FAILED", "PAYMENT_CANCELLED"].includes(workflowResponse.transactionState)
                               ? "bg-amber-500 hover:bg-amber-600 text-white"
-                              : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                              : "bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
                         }`}
                       >
                         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

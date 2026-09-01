@@ -191,7 +191,7 @@ async function runAllPhase5CTests() {
   // Turn 1: Search
   const turn1 = await runAgentWorkflow("I need a wireless mechanical keyboard under ₹5000.", undefined, sessId);
   assert(turn1.success, "Turn 1: Search succeeds");
-  assert(turn1.recommendation !== undefined, "Turn 1: Recommendation created");
+  assert((turn1 as any).recommendation !== undefined, "Turn 1: Recommendation created");
 
   // Turn 2: Compare top 3
   const turn2 = await runAgentWorkflow("Compare the top 3.", undefined, sessId);

@@ -159,6 +159,80 @@ export interface ProductComparisonData {
   groundedExplanation: string;
 }
 
+export type AgentActivityType =
+  | "REQUIREMENTS_UNDERSTOOD"
+  | "MERCHANT_SEARCH"
+  | "PRODUCT_FILTERING"
+  | "PRODUCT_COMPARISON"
+  | "BUDGET_VALIDATION"
+  | "INVENTORY_VALIDATION"
+  | "POLICY_VALIDATION"
+  | "PRODUCT_SELECTED"
+  | "BASKET_BUILT"
+  | "USER_APPROVAL_REQUIRED"
+  | "USER_APPROVED"
+  | "PAYMENT_INITIATED"
+  | "PAYMENT_VERIFIED"
+  | "ORDER_PERSISTED";
+
+export type AgentActivityStatus =
+  | "PENDING"
+  | "IN_PROGRESS"
+  | "COMPLETED"
+  | "WARNING"
+  | "BLOCKED";
+
+export interface AgentActivity {
+  id: string;
+  type: AgentActivityType;
+  status: AgentActivityStatus;
+  title: string;
+  summary: string;
+  metadata?: Record<string, any>;
+  timestamp: string;
+}
+
+export interface DecisionFactor {
+  factor: string;
+  status: "positive" | "neutral" | "tradeoff";
+  detail: string;
+}
+
+export interface DecisionHistoryEntry {
+  stepNumber: number;
+  actionTitle: string;
+  productName?: string;
+  merchantName?: string;
+  price?: number;
+  detail: string;
+  timestamp: string;
+}
+
+export interface AgentDecisionSummary {
+  requirements: string[];
+  merchantsEvaluated: number;
+  productsEvaluated: number;
+  validCandidates: number;
+  selectedProduct: Product;
+  matchScore: number;
+  budgetStatus: "WITHIN_BUDGET" | "BUDGET_EXCEEDED" | "NO_BUDGET_SET";
+  inventoryStatus: "AVAILABLE" | "LIMITED_AVAILABILITY" | "UNAVAILABLE";
+  policyStatus: "VALID" | "BLOCKED";
+  userLimit?: number;
+  basketTotal: number;
+  remainingBudget?: number;
+  tradeoffs: string[];
+  decisionFactors: DecisionFactor[];
+  decisionHistory: DecisionHistoryEntry[];
+  authorizationStatus: "PENDING_USER_APPROVAL" | "USER_APPROVED" | "PAYMENT_AUTHORIZED" | "PAYMENT_COMPLETED";
+}
+
+export interface TrustControls {
+  decisionControls: string[];
+  paymentControls: string[];
+  persistenceControls: string[];
+}
+
 export interface UpsellOpportunity {
   recommendedProduct: Product;
   originalTotal: number;
@@ -344,6 +418,10 @@ export interface CommerceConversationContext {
   razorpayPaymentId?: string;
   lastBasketHash?: string;
   requestedDiscount?: number;
+  agentActivities?: AgentActivity[];
+  decisionSummary?: AgentDecisionSummary;
+  trustControls?: TrustControls;
+  decisionHistory?: DecisionHistoryEntry[];
 }
 
 export interface WorkflowSuccessResponse {
@@ -354,6 +432,10 @@ export interface WorkflowSuccessResponse {
   comparisonCandidates?: RankedResult[];
   merchantComparison?: MerchantComparisonSummary;
   productComparison?: ProductComparisonData;
+  agentActivities?: AgentActivity[];
+  decisionSummary?: AgentDecisionSummary;
+  trustControls?: TrustControls;
+  decisionHistory?: DecisionHistoryEntry[];
   upsell: UpsellOpportunity | null;
   basket: {
     items: Product[];
@@ -377,6 +459,10 @@ export interface WorkflowFailureResponse {
   alternatives: RankedResult[];
   merchantComparison?: MerchantComparisonSummary;
   productComparison?: ProductComparisonData;
+  agentActivities?: AgentActivity[];
+  decisionSummary?: AgentDecisionSummary;
+  trustControls?: TrustControls;
+  decisionHistory?: DecisionHistoryEntry[];
   auditTrail: AuditEvent[];
   explanation?: ExplanationResult;
   sessionId: string;

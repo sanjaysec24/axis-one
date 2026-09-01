@@ -207,7 +207,8 @@ export function buildProductComparison(
     }
     // Use Case Fit
     if (intent.useCase && c.product.useCases?.some(u => u.toLowerCase().includes(intent.useCase!.toLowerCase()))) {
-      if (!bestForUseCase || c.matchScore > (candidates.find(item => item.product.id === bestForUseCase?.id)?.matchScore || 0)) {
+      const currentBest = bestForUseCase as Product | undefined;
+      if (!currentBest || c.matchScore > (candidates.find(item => item.product.id === currentBest.id)?.matchScore || 0)) {
         bestForUseCase = c.product;
       }
     }
@@ -399,7 +400,7 @@ export function buildProductComparison(
     attributeKey: "useCases",
     label: "Use Case Suitability",
     values: useCaseValues,
-    bestProductId: bestForUseCase?.id || bestMatch.id
+    bestProductId: bestForUseCase ? (bestForUseCase as Product).id : bestMatch.id
   });
 
   // Delivery Estimate Row
