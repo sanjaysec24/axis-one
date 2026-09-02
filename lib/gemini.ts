@@ -61,12 +61,44 @@ function validateExtractedIntent(intent: any): UserIntent {
 }
 
 /**
- * Extracts structured UserIntent from natural language messages using the Gemini API.
+ * Executes a promise with an enforced timeout race to prevent UI freezing.
+ */
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeoutFallback: () => T | Promise<T>): Promise<T> {
+  let timer: any;
+  const timeoutPromise = new Promise<T>((resolve) => {
+    timer = setTimeout(async () => {
+      resolve(await onTimeoutFallback());
+    }, timeoutMs);
+  });
+  try {
+    const result = await Promise.race([promise, timeoutPromise]);
+    clearTimeout(timer);
+    return result;
+  } catch (err) {
+    clearTimeout(timer);
+    throw err;
+  }
+}
+
+/**
+ * Extracts structured UserIntent from natural language messages using fast heuristics or Gemini API.
  */
 export async function extractIntentFromMessage(message: string): Promise<UserIntent> {
+  // Fast Path: If deterministic pattern recognition recognizes category and constraints with high confidence, return immediately (<1ms)
+  const quickFallback = extractIntentFromMessageFallback(message);
+  const lower = message.toLowerCase();
+  const hasObviousCategory = /\b(keyboard|mouse|headphone|earphone|monitor|webcam|hub|pad|rest|stand|dock)\b/i.test(lower);
+  
+  if (hasObviousCategory && quickFallback.productCategory && quickFallback.productCategory !== "Mechanical Keyboard") {
+    return quickFallback;
+  }
+  if (hasObviousCategory && (quickFallback.budget || quickFallback.wireless !== undefined || quickFallback.useCase)) {
+    return quickFallback;
+  }
+
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    return extractIntentFromMessageFallback(message);
+    return quickFallback;
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
@@ -86,7 +118,7 @@ export async function extractIntentFromMessage(message: string): Promise<UserInt
 
   // Configure model with system instruction and structured output schema
   const model = genAI.getGenerativeModel({
-    model: "gemini-3.5-flash",
+    model: "gemini-1.5-flash",
     systemInstruction,
     generationConfig: {
       responseMimeType: "application/json",
@@ -124,24 +156,29 @@ export async function extractIntentFromMessage(message: string): Promise<UserInt
   const prompt = `Extract user shopping intent from this query:\n\n"${message}"`;
 
   try {
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
-    
-    if (!text) {
-      return extractIntentFromMessageFallback(message);
-    }
+    return await withTimeout(
+      (async () => {
+        const result = await model.generateContent(prompt);
+        const text = result.response.text();
+        
+        if (!text) {
+          return quickFallback;
+        }
 
-    let parsedJson;
-    try {
-      parsedJson = JSON.parse(text);
-    } catch (err) {
-      return extractIntentFromMessageFallback(message);
-    }
+        let parsedJson;
+        try {
+          parsedJson = JSON.parse(text);
+        } catch (err) {
+          return quickFallback;
+        }
 
-    return validateExtractedIntent(parsedJson);
+        return validateExtractedIntent(parsedJson);
+      })(),
+      1500,
+      () => quickFallback
+    );
   } catch (error: any) {
-    console.warn("Gemini Intent Extraction failed. Degrading to deterministic fallback. Error:", error.message);
-    return extractIntentFromMessageFallback(message);
+    return quickFallback;
   }
 }
 
@@ -242,6 +279,11 @@ export async function generateExplanation(
     context.recentMessages
   );
 
+  // Fast-path: For deterministic commerce actions, generate instant tailored explanation (<1ms)
+  if (["GREETING", "CONFIRMATION", "CANCEL_SELECTION", "PAYMENT_GUIDANCE", "PRODUCT_COMPARISON", "CHEAPER_ALTERNATIVE", "REMOVE_UPSELL", "REMOVE_PRODUCT", "THANKS", "FAREWELL", "CLARIFICATION_REQUIRED"].includes(responseIntent)) {
+    return generateFallbackExplanation(context);
+  }
+
   const genAI = new GoogleGenerativeAI(apiKey);
 
   const systemInstruction = 
@@ -258,7 +300,7 @@ export async function generateExplanation(
     "8. Use only the provided facts, prices, warranties, and merchant names. Do not invent features or prices.";
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-3.5-flash",
+    model: "gemini-1.5-flash",
     systemInstruction,
     generationConfig: {
       responseMimeType: "application/json",
@@ -300,23 +342,28 @@ export async function generateExplanation(
   const prompt = `Generate an explanation for this commerce context (Intent Type: ${responseIntent}):\n\n${JSON.stringify(context, null, 2)}`;
 
   try {
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    return await withTimeout(
+      (async () => {
+        const result = await model.generateContent(prompt);
+        const text = result.response.text();
 
-    if (!text) {
-      return generateFallbackExplanation(context);
-    }
+        if (!text) {
+          return generateFallbackExplanation(context);
+        }
 
-    const parsedJson = JSON.parse(text);
-    return {
-      recommendationExplanation: parsedJson.recommendationExplanation,
-      upsellExplanation: parsedJson.upsellExplanation,
-      budgetExplanation: parsedJson.budgetExplanation,
-      policyExplanation: parsedJson.policyExplanation,
-      summary: parsedJson.summary
-    };
+        const parsedJson = JSON.parse(text);
+        return {
+          recommendationExplanation: parsedJson.recommendationExplanation,
+          upsellExplanation: parsedJson.upsellExplanation,
+          budgetExplanation: parsedJson.budgetExplanation,
+          policyExplanation: parsedJson.policyExplanation,
+          summary: parsedJson.summary
+        };
+      })(),
+      1500,
+      () => generateFallbackExplanation(context)
+    );
   } catch (error: any) {
-    console.warn("Gemini Explanation failed. Degrading to deterministic fallback. Error:", error.message);
     return generateFallbackExplanation(context);
   }
 }
@@ -604,7 +651,7 @@ export async function classifyFollowUp(
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
-      model: "gemini-3.5-flash",
+      model: "gemini-1.5-flash",
       systemInstruction,
       generationConfig: {
         responseMimeType: "application/json",
@@ -673,23 +720,28 @@ export async function classifyFollowUp(
 
     const prompt = `Classify this user message:\n\n"${message}"\n\nContext:\n${JSON.stringify(conversationContextSummary, null, 2)}`;
     
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    return await withTimeout(
+      (async () => {
+        const result = await model.generateContent(prompt);
+        const text = result.response.text();
 
-    if (!text) {
-      return classifyFollowUpFallback(message, context);
-    }
+        if (!text) {
+          return classifyFollowUpFallback(message, context);
+        }
 
-    const parsed = JSON.parse(text);
-    return {
-      action: parsed.action,
-      ...(parsed.budget ? { budget: Math.round(Number(parsed.budget)) } : {}),
-      ...(parsed.wireless !== undefined ? { wireless: !!parsed.wireless } : {}),
-      ...(parsed.batteryPriority ? { batteryPriority: parsed.batteryPriority } : {}),
-      ...(parsed.useCase ? { useCase: String(parsed.useCase) } : {})
-    };
+        const parsed = JSON.parse(text);
+        return {
+          action: parsed.action,
+          ...(parsed.budget ? { budget: Math.round(Number(parsed.budget)) } : {}),
+          ...(parsed.wireless !== undefined ? { wireless: !!parsed.wireless } : {}),
+          ...(parsed.batteryPriority ? { batteryPriority: parsed.batteryPriority } : {}),
+          ...(parsed.useCase ? { useCase: String(parsed.useCase) } : {})
+        };
+      })(),
+      1200,
+      () => classifyFollowUpFallback(message, context)
+    );
   } catch (error: any) {
-    console.warn("Gemini Classification failed. Degrading to deterministic fallback. Error:", error.message);
     return classifyFollowUpFallback(message, context);
   }
 }
