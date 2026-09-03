@@ -1,57 +1,147 @@
-# AXIS ONE — AI Buyer Commerce Agent
+# AXIS ONE
 
-AXIS ONE is a next-generation AI Buyer Commerce Agent designed for the Razorpay Buildathon.
+## AI Buyer for Agentic Commerce
 
-The agent enables an AI buyer to understand a user's shopping intent, search a merchant catalog, rank products based on utility and budget, suggest cross-sells and upsell opportunities, validate actions against deterministic business policies, require explicit user approval, and complete Razorpay test transactions with a strict audit trail.
+> **From understanding what you need to completing the purchase — with you always in control.**
+
+AXIS ONE is an AI-powered Buyer Agent built for the future of **Agentic Commerce**.
+
+Instead of making users search, compare, decide, and checkout manually, AXIS ONE allows users to describe what they need in natural language.
+
+The agent then understands the request, searches across merchants, compares products, checks important constraints, explains its recommendation, and prepares the purchase.
+
+The most important part is that **AXIS ONE cannot silently spend the user's money.**
+
+Payment requires explicit user approval before the transaction can proceed through Razorpay.
 
 ---
 
-## 🏗️ Phase 1 Architecture
+# 🎯 The Problem
 
-We prioritize modularity, safety, and predictability. The commerce engine logic is written in deterministic, strongly-typed TypeScript and is kept completely independent of the UI and LLM integrations. This guarantees that **AI never directly controls or modifies money-related operations**.
+Online shopping usually requires the buyer to do everything manually:
 
+- Search for products
+- Open multiple product pages
+- Compare prices
+- Compare features
+- Check whether the product fits their needs
+- Check budget
+- Decide which product is best
+- Build the basket
+- Checkout
+- Make the payment
+
+AI assistants can already recommend products.
+
+But recommendation is only one part of commerce.
+
+The bigger question is:
+
+> **Can an AI agent help complete the buying journey while keeping the user in control of the transaction?**
+
+AXIS ONE explores this problem.
+
+---
+
+# 💡 Our Solution
+
+AXIS ONE works as a conversational AI Buyer.
+
+Instead of saying:
+
+> "Search for wireless keyboards."
+
+A user can simply say:
+
+> **"I need a wireless mechanical keyboard for programming under ₹5000."**
+
+AXIS ONE understands the request and turns it into structured requirements.
+
+It then:
+
+1. Understands the buyer's intent
+2. Searches across multiple merchants
+3. Finds relevant products
+4. Filters products based on requirements
+5. Compares available options
+6. Explains the recommendation
+7. Maintains conversation context
+8. Allows natural-language basket changes
+9. Validates budget and commerce constraints
+10. Requires explicit user approval
+11. Opens Razorpay checkout
+12. Verifies the payment
+13. Stores the verified order in Firestore
+
+---
+
+# 🧠 How AXIS ONE Works
+
+<img width="1672" height="941" alt="6120d6a6-5ef2-4095-a0d0-65ef3c7c03fe" src="https://github.com/user-attachments/assets/4037c4db-0044-443d-9a2e-7c6488281ff1" />
+
+
+# 📁 Project Structure
 ```
 axis-one/
-├── app/                  # Next.js App Router Pages
-│   ├── globals.css       # Global styles (Tailwind V4)
-│   ├── layout.tsx        # Base App layout configuration
-│   └── page.tsx          # Phase 1 initialization & verification portal
 │
-├── data/                 # Static Product & Policy Database
-│   ├── products.ts       # Nexora Tech fictional catalog (15 products)
-│   ├── policies.ts       # Fictional merchant compliance & discount policies
-│   └── bundles.ts        # Promotional product bundles
+├── app/
+│   ├── api/
+│   │   ├── agent/
+│   │   ├── payment/
+│   │   └── webhook/
+│   │
+│   └── page.tsx
 │
-├── lib/                  # Foundational Commerce Engine Core
-│   ├── types.ts          # Strong TypeScript type definitions
-│   ├── catalog.ts        # Product query and lookup services
-│   ├── ranking.ts        # Query and constraint-based product scoring
-│   ├── upsell.ts         # Cross-sell & bundle upgrade suggestions
-│   ├── policy.ts         # Budget, inventory, & price rule validation
-│   └── audit.ts          # In-memory logging & action audit logs
+├── lib/
+│   ├── agentWorkflow.ts
+│   ├── firebaseAdmin.ts
+│   ├── gemini.ts
+│   ├── orders.ts
+│   ├── razorpay.ts
+│   ├── session.ts
+│   ├── stateTransition.ts
+│   └── types.ts
 │
-└── README.md
+├── public/
+│
+├── package.json
+├── README.md
+└── ...
+```
+```
+⚙️ Local Setup
+1. Clone the repository
+git clone https://github.com/sanjaysec24/axis-one.git
+cd axis-one
+2. Install dependencies
+npm install
+3. Configure environment variables
+
+Create a local file:
+
+.env.local
+
+Add the required credentials:
+
+RAZORPAY_KEY_ID=
+RAZORPAY_KEY_SECRET=
+
+GEMINI_API_KEY=
+
+FIREBASE_PROJECT_ID=
+FIREBASE_CLIENT_EMAIL=
+FIREBASE_PRIVATE_KEY=
+
+Never commit .env.local, Firebase private keys, API keys, or payment secrets to GitHub.
+
+4. Start the development server
+npm run dev
+
+Open:
+
+http://localhost:3000
+5. Create a production build
+npm run build
 ```
 
----
-
-## 📦 Fictional Merchant: Nexora Tech
-
-For Phase 1, we model **Nexora Tech**, a premium consumer electronics and productivity accessory merchant.
-
-The catalog contains **exactly 15 products** across 6 core categories:
-1. **Mechanical Keyboards** (e.g., *NovaKey K75* - ₹4,499, *Apex Pro X* - ₹6,999)
-2. **Wireless Mice** (e.g., *Precision Click Pro* - ₹2,499)
-3. **Wrist Rests** (e.g., *ErgoRest Wrist Support* - ₹399)
-4. **Mouse Pads** (e.g., *DeskMat Pro Minimal* - ₹799)
-5. **Headphones** (e.g., *AuraSound ANC* - ₹4,999)
-6. **Laptop Stands** (e.g., *FlexiStand Aluminum* - ₹1,599)
-
----
-
-## 🛡️ Key Safety & Commercial Rules Implemented
-- **Budget Validation:** Cart validation fails if total price exceeds user budget.
-- **Inventory Check:** Prevents purchasing items exceeding available stock level.
-- **Cross-Sell Discounts:** Evaluates discount triggers (e.g. 10% off `ErgoRest Wrist Support` when purchased alongside `NovaKey K75`).
-- **Safety Limits:** Automatically blocks single transactions exceeding ₹10,000 to comply with Razorpay test-mode thresholds.
-- **Audit Trails:** Logs every step of the transaction evaluation for security auditing.
+# Demo video link:
