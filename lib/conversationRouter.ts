@@ -3,14 +3,15 @@ import {
   CommerceConversationContext, 
   RouterResult, 
   UserIntent, 
-  RankedResult 
+  RankedResult,
+  Product 
 } from "./types";
 import { getAllProducts, getProductById } from "./catalog";
 
 /**
  * Deterministic Fast Conversational Router.
- * Evaluates short conversational messages, contextual references, and state transitions
- * BEFORE invoking expensive Gemini extraction.
+ * Evaluates short conversational messages, contextual references, item removals,
+ * comparisons, and state transitions BEFORE invoking expensive Gemini extraction.
  */
 export function routeConversationalMessage(
   message: string,
@@ -19,7 +20,6 @@ export function routeConversationalMessage(
   const clean = message.toLowerCase().trim().replace(/[.,!?;:]+/g, " ").replace(/\s+/g, " ").trim();
   const normalized = clean;
   const words = clean.split(/\s+/);
-  const wordCount = words.length;
 
   const lastAssistantMsg = context?.recentMessages
     ? [...context.recentMessages].reverse().find(m => m.role === "AXIS_ONE")?.content.toLowerCase() || ""
@@ -46,7 +46,7 @@ export function routeConversationalMessage(
       return {
         action: "GREETING",
         confidence: 1.0,
-        directMessage: `Hey! 👋 Your ${activeProduct.name} selection from ${activeProduct.merchantName} (₹${activeProduct.price}) is still active. Want to compare alternatives, adjust your budget, or continue to checkout?`,
+        directMessage: `Hey! 👋 Your ${activeProduct.name} selection from ${activeProduct.merchantName || "merchant"} (₹${activeProduct.price}) is still active. Want to compare alternatives, adjust your budget, or continue to checkout?`,
         reasoning: "Retained active session product on greeting."
       };
     }
@@ -86,7 +86,19 @@ export function routeConversationalMessage(
   }
 
   // =========================================================================
-  // 2B. HELP & AGENT CAPABILITIES
+  // 2B. PAUSE / WAIT ("wait", "hold on", "pause", "give me a sec")
+  // =========================================================================
+  if (/^(wait|hold on|pause|give me a second|give me a sec|one second|one sec|wait a minute|wait a sec)$/i.test(clean)) {
+    return {
+      action: "KEEP_CURRENT_SELECTION",
+      confidence: 1.0,
+      directMessage: "No rush at all! Take your time, and let me know whenever you'd like to adjust items, compare stores, or proceed.",
+      reasoning: "User asked to pause/wait."
+    };
+  }
+
+  // =========================================================================
+  // 2C. HELP & AGENT CAPABILITIES
   // =========================================================================
   if (
     clean === "help" || 
@@ -106,153 +118,151 @@ export function routeConversationalMessage(
   }
 
   // =========================================================================
-  // 3. CONTEXTUAL YES / NO & CANCEL RESOLUTION
+  // 3. ITEM REMOVAL (PRIORITY 1 FOR COMMERCE ACTIONS)
+  // "remove wrist support", "remove wrist rest", "remove wrist band", "remove the wrist support",
+  // "remove ErgoBest Wrist Support", "remove it", "drop accessory", "without wrist rest", "remove keyboard"
   // =========================================================================
-  const isExplicitConfirm = 
-    clean.includes("i'll take it") || 
-    clean.includes("ill take it") || 
-    clean.includes("take it") || 
-    clean.includes("confirm") || 
-    clean.includes("buy now") || 
-    clean.includes("let's do it") || 
-    clean.includes("lets do it") || 
-    clean.includes("proceed to checkout") || 
-    clean.includes("proceed to payment");
+  const isRemoveIntent = 
+    clean.startsWith("remove ") ||
+    clean.startsWith("drop ") ||
+    clean.startsWith("delete ") ||
+    clean.startsWith("take off ") ||
+    clean.startsWith("take out ") ||
+    clean.startsWith("without ") ||
+    clean.startsWith("exclude ") ||
+    clean.startsWith("leave out ") ||
+    clean.includes("don't want") ||
+    clean.includes("dont want") ||
+    clean.includes("no accessory") ||
+    clean.includes("without the accessory") ||
+    clean === "remove it" ||
+    clean === "remove that" ||
+    clean === "drop it" ||
+    clean === "drop that" ||
+    clean === "take it off";
 
-  const isYes = 
-    isExplicitConfirm ||
-    clean === "yes" || 
-    clean === "yeah" || 
-    clean === "yep" || 
-    clean === "sure" || 
-    clean === "ok" || 
-    clean === "okay" || 
-    clean.startsWith("yes ") || 
-    clean.includes("sounds good") || 
-    clean.includes("go ahead");
+  if (isRemoveIntent) {
+    // Extract raw target item phrase
+    const rawTarget = clean
+      .replace(/^(remove|drop|delete|take off|take out|without|exclude|leave out|don't want|dont want)\s+(the\s+)?/i, "")
+      .replace(/^(a\s+|an\s+)/i, "")
+      .trim();
 
-  const isNo = 
-    clean === "no" || 
-    clean === "nah" || 
-    clean === "nope" || 
-    clean.includes("cancel") || 
-    clean.includes("no thanks") || 
-    clean.includes("don't want") || 
-    clean.includes("dont want") || 
-    clean.includes("drop it") || 
-    clean.startsWith("no ");
+    // Check if user is referencing the upsell accessory generically or specifically
+    const isGenericUpsellRef = 
+      rawTarget === "it" || 
+      rawTarget === "that" || 
+      rawTarget === "accessory" || 
+      rawTarget === "the accessory" || 
+      rawTarget === "upsell" || 
+      clean === "no accessory" || 
+      clean === "without the accessory";
 
-  if (isYes || isNo) {
-    if (isExplicitConfirm) {
+    // 1. Try matching against items in currentBasket
+    if (activeBasket.length > 0) {
+      // Find candidate match in basket
+      const basketMatch = activeBasket.find(item => {
+        const itemName = item.name.toLowerCase();
+        const itemCat = item.category.toLowerCase();
+        
+        if (isGenericUpsellRef) {
+          // If generic "it/accessory", match the item that is not the main recommended product
+          return item.id !== activeProduct?.id;
+        }
+
+        // Exact or substring match on product name or category
+        if (rawTarget.length >= 3 && (itemName.includes(rawTarget) || rawTarget.includes(itemName))) {
+          return true;
+        }
+
+        // Token-based matching (e.g. "wrist support" matching "ErgoBest Wrist Support" or "Wrist Rest")
+        const targetTokens = rawTarget.split(/\s+/).filter(t => t.length >= 3);
+        if (targetTokens.length > 0) {
+          const matchCount = targetTokens.filter(t => itemName.includes(t) || itemCat.includes(t)).length;
+          return matchCount >= 1 && (item.id !== activeProduct?.id || targetTokens.some(t => itemCat.includes(t)));
+        }
+
+        return false;
+      });
+
+      if (basketMatch) {
+        const isUpsell = basketMatch.id !== activeProduct?.id || basketMatch.id === context?.currentUpsell?.id;
+        return {
+          action: isUpsell ? "REMOVE_UPSELL" : "REMOVE_PRODUCT",
+          targetProductId: basketMatch.id,
+          confidence: 1.0,
+          reasoning: `User requested removal of ${basketMatch.name} from basket.`
+        };
+      }
+    }
+
+    // 2. Try matching against currentUpsell even if not yet added to currentBasket
+    if (context?.currentUpsell) {
+      const upName = context.currentUpsell.name.toLowerCase();
+      const upCat = context.currentUpsell.category.toLowerCase();
+      if (
+        isGenericUpsellRef || 
+        (rawTarget.length >= 3 && (upName.includes(rawTarget) || rawTarget.includes(upName) || upCat.includes(rawTarget))) ||
+        rawTarget.split(/\s+/).some(t => t.length >= 3 && (upName.includes(t) || upCat.includes(t)))
+      ) {
+        return {
+          action: "REMOVE_UPSELL",
+          targetProductId: context.currentUpsell.id,
+          confidence: 1.0,
+          reasoning: `User requested removal of proposed upsell accessory ${context.currentUpsell.name}.`
+        };
+      }
+    }
+
+    // If context has multiple items and remove requested with "it"
+    if (activeBasket.length > 1) {
+      const accessory = activeBasket.find(item => item.id !== activeProduct?.id);
+      if (accessory) {
+        return {
+          action: "REMOVE_UPSELL",
+          targetProductId: accessory.id,
+          confidence: 1.0,
+          reasoning: `User requested removal of accessory ${accessory.name}.`
+        };
+      }
+    }
+
+    // If only one item in basket and user asks to remove it
+    if (activeBasket.length === 1) {
       return {
-        action: "CONFIRM_SELECTION",
-        confidence: 1.0,
-        reasoning: "Explicit affirmative message confirmed basket selection."
-      };
-    }
-
-    // Check if the previous message or pending action was asking about upsell
-    const isUpsellPrompt = pendingAction === "ADD_UPSELL_PROMPT" || 
-      /\b(would you like to add|should i add|add this to your basket|add it\?)\b/i.test(lastAssistantMsg);
-
-    const isCheaperPrompt = pendingAction === "CHEAPER_ALTERNATIVE_PROMPT" || 
-      /\b(would you prefer the cheaper|switch to the cheaper)\b/i.test(lastAssistantMsg);
-
-    const isCheckoutPrompt = pendingAction === "CONFIRM_CHECKOUT" || 
-      /\b(ready for checkout|proceed to payment|proceed\?)\b/i.test(lastAssistantMsg);
-
-    if (isUpsellPrompt) {
-      if (isYes) {
-        return {
-          action: "ADD_UPSELL",
-          confidence: 1.0,
-          reasoning: "Contextual YES accepted proposed upsell accessory."
-        };
-      } else {
-        return {
-          action: "KEEP_CURRENT_SELECTION",
-          confidence: 1.0,
-          directMessage: `Kept your main selection (${activeProduct?.name || "product"}) without the accessory. Ready for checkout whenever you are!`,
-          reasoning: "Contextual NO declined proposed upsell accessory."
-        };
-      }
-    }
-
-    if (isCheaperPrompt) {
-      if (isYes) {
-        return {
-          action: "REQUEST_CHEAPER_OPTION",
-          confidence: 1.0,
-          reasoning: "Contextual YES requested cheaper alternative switch."
-        };
-      } else {
-        return {
-          action: "KEEP_CURRENT_SELECTION",
-          confidence: 1.0,
-          directMessage: `Understood — keeping your ${activeProduct?.name || "current selection"}.`,
-          reasoning: "Contextual NO kept current recommendation over cheaper alternative."
-        };
-      }
-    }
-
-    if (isCheckoutPrompt) {
-      if (isYes) {
-        return {
-          action: "CONFIRM_SELECTION",
-          confidence: 1.0,
-          reasoning: "Contextual YES confirmed checkout readiness."
-        };
-      } else {
-        return {
-          action: "KEEP_CURRENT_SELECTION",
-          confidence: 1.0,
-          directMessage: "No problem. Let me know if you want to explore other products or adjust features.",
-          reasoning: "Contextual NO paused checkout confirmation."
-        };
-      }
-    }
-
-    // Generic YES confirms selection
-    if (isYes) {
-      return {
-        action: "CONFIRM_SELECTION",
+        action: "REMOVE_PRODUCT",
+        targetProductId: activeBasket[0].id,
         confidence: 0.95,
-        reasoning: "Affirmative message confirmed current selection."
-      };
-    }
-
-    if (isNo) {
-      if (clean.includes("cancel") || !context) {
-        return {
-          action: "CANCEL_SELECTION",
-          confidence: 0.95,
-          reasoning: "User cancelled selection."
-        };
-      }
-      return {
-        action: "KEEP_CURRENT_SELECTION",
-        confidence: 0.95,
-        directMessage: "Understood. Let me know what you'd like to change.",
-        reasoning: "Negative response retained current state."
+        reasoning: `User requested removal of ${activeBasket[0].name}.`
       };
     }
   }
 
   // =========================================================================
-  // 4. EXPLANATION & "WHY" QUERIES ("why", "why this", "why this one", "why novakey?")
+  // 4. CHEAPER REQUESTS ("cheaper", "find something cheaper", "show cheaper", "cheaper option")
   // =========================================================================
-  if (/^(why|why\?|why this|why this one|why this one\?|why did you choose this|why did you pick this|why did you recommend this|why recommend this|explain|tell me why|why this product|why this keyboard)\??$/i.test(normalized)) {
-    return {
-      action: "REQUEST_EXPLANATION",
-      confidence: 1.0,
-      reasoning: "User requested explanation of active product recommendation."
-    };
-  }
-
-  // =========================================================================
-  // 5. CHEAPER REQUESTS ("cheaper", "anything cheaper?", "is there a cheaper one?")
-  // =========================================================================
-  if (/^(cheaper|anything cheaper|anything cheaper\?|is there a cheaper one|is there a cheaper one\?|show me cheaper|show cheaper|make it cheaper|too expensive|cheaper alternative|cheapest option|lower price)\??$/i.test(normalized)) {
+  if (
+    clean === "cheaper" ||
+    clean === "cheaper?" ||
+    clean === "cheapest" ||
+    clean === "cheapest?" ||
+    clean === "show cheaper" ||
+    clean === "show me cheaper" ||
+    clean === "find something cheaper" ||
+    clean === "cheaper option" ||
+    clean === "cheaper one" ||
+    clean === "anything cheaper" ||
+    clean === "anything cheaper?" ||
+    clean === "is there a cheaper one" ||
+    clean === "is there a cheaper one?" ||
+    clean === "too expensive" ||
+    clean === "lower price" ||
+    clean.includes("the cheaper one") || 
+    clean.includes("cheaper one") || 
+    clean.includes("pick the cheaper") || 
+    clean.includes("select the cheaper") ||
+    clean.includes("go with the cheaper")
+  ) {
     return {
       action: "REQUEST_CHEAPER_OPTION",
       confidence: 1.0,
@@ -261,11 +271,16 @@ export function routeConversationalMessage(
   }
 
   // =========================================================================
-  // 6. PRODUCT & MERCHANT COMPARISON
-  // ("compare", "what is the difference", "which is better", "which has better battery", "which is better for programming")
+  // 5. PRODUCT & MERCHANT COMPARISON
+  // ("compare", "compare the top 3", "compare these", "compare them", "what is the difference", "which is better")
   // =========================================================================
   if (
-    clean.includes("compare") ||
+    clean === "compare" ||
+    clean === "compare?" ||
+    clean === "compare them" ||
+    clean === "compare these" ||
+    clean === "compare all" ||
+    clean.startsWith("compare ") ||
     clean.includes("difference") ||
     clean.includes("differences") ||
     clean.includes("which is better") ||
@@ -283,11 +298,7 @@ export function routeConversationalMessage(
     clean.includes("better for office") ||
     clean.includes("which merchant") ||
     clean.includes("different stores") ||
-    clean.includes("better deal") ||
-    clean === "better" ||
-    clean === "better?" ||
-    clean === "cheapest" ||
-    clean === "cheapest?"
+    clean.includes("better deal")
   ) {
     return {
       action: "PRODUCT_COMPARISON",
@@ -297,59 +308,15 @@ export function routeConversationalMessage(
   }
 
   // =========================================================================
-  // 7. PAYMENT & CHECKOUT GUIDANCE ("payment", "checkout", "how to pay")
+  // 6. REFERENCES, ORDINALS & SELECTIONS FROM COMPARISON
+  // ("first one", "the first one", "choose the first one", "second one", "the second one", "choose the second one")
   // =========================================================================
-  if (/^(payment|checkout|pay|how to pay|how do i pay|pay now|proceed to checkout|proceed to pay|payment options|payment methods)\??$/i.test(clean)) {
-    return {
-      action: "PAYMENT_GUIDANCE",
-      confidence: 1.0,
-      reasoning: "User requested payment guidance."
-    };
-  }
-
-  // =========================================================================
-  // 8. ITEM REMOVAL ("remove it", "remove that", "drop accessory", "remove wrist rest")
-  // =========================================================================
-  if (
-    /^(remove it|remove that|drop it|remove accessory|drop accessory|remove the accessory|remove the wrist rest|remove wrist rest|remove the support|remove support|dont want the accessory|no accessory|take it off)$/i.test(clean)
-  ) {
-    if (context?.currentUpsell || activeBasket.length > 1) {
-      return {
-        action: "REMOVE_UPSELL",
-        confidence: 1.0,
-        reasoning: "User requested removal of referenced accessory/upsell."
-      };
-    }
-    return {
-      action: "REMOVE_PRODUCT",
-      confidence: 0.9,
-      reasoning: "User requested removal of main item."
-    };
-  }
-
-  // =========================================================================
-  // 9. REFERENCES, ORDINALS & SELECTIONS FROM COMPARISON
-  // ("the first one", "the second one", "choose the first one", "take KeyForge", "select NovaKey", "I'll go with the cheaper one")
-  // =========================================================================
-  if (
-    clean.includes("the cheaper one") || 
-    clean.includes("cheaper one") || 
-    clean.includes("pick the cheaper") || 
-    clean.includes("select the cheaper") ||
-    clean.includes("go with the cheaper")
-  ) {
-    return {
-      action: "REQUEST_CHEAPER_OPTION",
-      confidence: 1.0,
-      reasoning: "User selected the cheaper option via reference."
-    };
-  }
-
   if (
     clean === "first" ||
     clean === "the first" ||
     clean === "first one" ||
     clean === "the first one" ||
+    clean === "i want the first one" ||
     clean.includes("choose the first") ||
     clean.includes("select the first") ||
     clean.includes("take the first") ||
@@ -372,6 +339,7 @@ export function routeConversationalMessage(
     clean === "the second" ||
     clean === "second one" ||
     clean === "the second one" ||
+    clean === "i want the second one" ||
     clean.includes("choose the second") ||
     clean.includes("select the second") ||
     clean.includes("take the second") ||
@@ -394,6 +362,7 @@ export function routeConversationalMessage(
     clean === "the third" ||
     clean === "third one" ||
     clean === "the third one" ||
+    clean === "i want the third one" ||
     clean.includes("choose the third") ||
     clean.includes("select the third") ||
     clean.includes("take the third") ||
@@ -438,27 +407,67 @@ export function routeConversationalMessage(
     }
   }
 
-  if (/^(this one|that one|i'll take this one|i'll take that one|select this|select that|this keyboard|that keyboard)$/i.test(normalized)) {
-    if (activeProduct) {
-      return {
-        action: "CONFIRM_SELECTION",
-        confidence: 1.0,
-        targetProductId: activeProduct.id,
-        reasoning: "User confirmed the current active recommended product."
-      };
-    }
+  // =========================================================================
+  // 7. EXPLANATION & "WHY" QUERIES ("why", "why?", "why this one?", "why this product?")
+  // =========================================================================
+  if (/^(why|why\?|why this|why this one|why this one\?|why did you choose this|why did you pick this|why did you recommend this|why recommend this|explain|tell me why|why this product|why this keyboard|why this mouse)\??$/i.test(normalized)) {
+    return {
+      action: "REQUEST_EXPLANATION",
+      confidence: 1.0,
+      reasoning: "User requested explanation of active product recommendation."
+    };
   }
 
   // =========================================================================
-  // 10. OKAY / CONFIRMATION ACKNOWLEDGEMENTS ("okay", "ok", "sounds good", "i'll take it")
+  // 8. PAYMENT & CHECKOUT GUIDANCE ("payment", "checkout", "how to pay")
   // =========================================================================
-  if (
-    /^(okay|ok|sounds good|looks good|i'll take it|ill take it|confirm|proceed|buy|buy now|let's do it|lets do it|fine|deal)$/i.test(normalized)
-  ) {
+  if (/^(payment|checkout|pay|how to pay|how do i pay|pay now|proceed to checkout|proceed to pay|payment options|payment methods)\??$/i.test(clean)) {
+    return {
+      action: "PAYMENT_GUIDANCE",
+      confidence: 1.0,
+      reasoning: "User requested payment guidance."
+    };
+  }
+
+  // =========================================================================
+  // 9. EXPLICIT CONFIRMATION / APPROVAL ("okay", "okayyy", "ok", "yes", "confirm", "I'll take it")
+  // =========================================================================
+  const isExplicitConfirm = 
+    clean.includes("i'll take it") || 
+    clean.includes("ill take it") || 
+    clean.includes("take it") || 
+    clean.includes("confirm") || 
+    clean.includes("buy now") || 
+    clean.includes("let's do it") || 
+    clean.includes("lets do it") || 
+    clean.includes("proceed to checkout") || 
+    clean.includes("proceed to payment") ||
+    /^(okay|okayy|okayyy|ok|okk|okkk|yes|yess|yesss|sure|yep|yeah|deal|done|go ahead|sounds good|looks good)$/i.test(clean);
+
+  if (isExplicitConfirm) {
     return {
       action: "CONFIRM_SELECTION",
+      confidence: (activeProduct || activeBasket.length > 0) ? 1.0 : 0.95,
+      reasoning: "User confirmed basket selection."
+    };
+  }
+
+  // =========================================================================
+  // 10. CANCEL SELECTION ("cancel", "no thanks", "nevermind")
+  // =========================================================================
+  if (
+    clean === "cancel" || 
+    clean === "nevermind" || 
+    clean === "no" || 
+    clean === "nah" || 
+    clean === "nope" || 
+    clean.includes("cancel") ||
+    clean.includes("no thanks")
+  ) {
+    return {
+      action: "CANCEL_SELECTION",
       confidence: 1.0,
-      reasoning: "User confirmed proposal."
+      reasoning: "User cancelled selection."
     };
   }
 
@@ -499,14 +508,14 @@ export function routeConversationalMessage(
     "webcam": "Webcams",
     "laptop stand": "Laptop Accessories",
     "usb hub": "USB Hubs",
-    "wrist rest": "Wrist Rest"
+    "wrist rest": "Wrist Rest",
+    "wrist support": "Wrist Rest"
   };
 
   if (categoryKeywords[normalized]) {
     const cat = categoryKeywords[normalized];
     const prevIntent = context?.latestIntent || context?.originalIntent;
 
-    // If context already exists with budget or preferences, reuse them!
     if (prevIntent && prevIntent.budget) {
       return {
         action: "NEW_SEARCH",
@@ -522,7 +531,6 @@ export function routeConversationalMessage(
       };
     }
 
-    // If fresh / no budget context, prompt clarifying question
     return {
       action: "CLARIFICATION_REQUIRED",
       extractedRequirements: { productCategory: cat },

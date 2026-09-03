@@ -483,31 +483,27 @@ export function generateFallbackExplanation(
       }
 
       case "CHEAPER_ALTERNATIVE": {
-        let tradeOffText = "";
-        if (tradeoffs && tradeoffs.length > 0) {
-          tradeOffText = ` Note trade-off: ${tradeoffs.join(" ")}`;
-        } else {
-          tradeOffText = " It delivers core functionality at an economical price.";
-        }
-        const savings = previousProduct ? previousProduct.price - recommendation.price : 0;
-        const savingsText = savings > 0 ? ` (saving ₹${savings})` : "";
-        summary = `I found a cheaper option: ${recommendation.name} from ${recommendation.merchantName || "store"} at ₹${recommendation.price}${savingsText}.${tradeOffText}`;
+        summary = `I found a cheaper option: ${recommendation.name} from ${recommendation.merchantName || "merchant"} at ₹${recommendation.price}.`;
         break;
       }
 
       case "REMOVE_UPSELL": {
-        summary = `Done. I've removed the complementary accessory and kept the ${recommendation.name} as your primary selection. Your basket total is updated to ₹${basket.total}.`;
+        if (basket.total === 0) {
+          summary = `Done — I removed the item. Your basket is now empty.`;
+        } else {
+          summary = `Done — I removed the accessory. Your ${recommendation.name} remains selected.`;
+        }
         break;
       }
 
       case "ADD_UPSELL": {
         const upsellName = upsell ? upsell.name : "accessory";
-        summary = `Added the ${upsellName} to your basket. Your updated total is ₹${basket.total}, which stays within your budget.`;
+        summary = `Added the ${upsellName} to your basket. Your updated total is ₹${basket.total}.`;
         break;
       }
 
       case "KEEP_CURRENT_SELECTION": {
-        summary = `Understood — keeping your active selection of the ${recommendation.name} (₹${recommendation.price}).`;
+        summary = `Understood — keeping your active selection of the ${recommendation.name} (₹${recommendation.price}). Take your time, and let me know when you're ready.`;
         break;
       }
 
@@ -517,20 +513,20 @@ export function generateFallbackExplanation(
         } else if (merchantComparison && merchantComparison.comparisonText) {
           summary = merchantComparison.comparisonText;
         } else {
-          summary = `Here is how the top options compare across stores. The ${recommendation.name} from ${recommendation.merchantName || "merchant"} (₹${recommendation.price}) remains your strongest match.`;
+          summary = `Here are the top options compared by price, features, merchant, and requirement match.`;
         }
         break;
       }
 
       case "REQUEST_EXPLANATION": {
-        const matchCriteria = recommendation.matchedCriteria.length > 0 ? recommendation.matchedCriteria.join(", ") : "your search criteria";
+        const matchCriteria = recommendation.matchedCriteria.length > 0 ? recommendation.matchedCriteria.join(", ") : "requirements";
         const mText = recommendation.merchantName ? ` from ${recommendation.merchantName}` : "";
-        summary = `I recommended the ${recommendation.name}${mText} because it satisfies your strongest requirements (${matchCriteria}) at ₹${recommendation.price}. It scored highest in our multi-merchant catalog evaluation with verified inventory and policy compliance.`;
+        summary = `${recommendation.name}${mText} is the best match because it fits your budget and satisfies your ${matchCriteria} (₹${recommendation.price}).`;
         break;
       }
 
       case "CONFIRMATION": {
-        summary = `Great choice! Your basket with ${recommendation.name} from ${recommendation.merchantName || "merchant"} is locked in. Click 'Pay securely via Razorpay' to complete checkout.`;
+        summary = `Understood. Your selection is approved. You can now proceed to secure payment via Razorpay.`;
         break;
       }
 
@@ -577,13 +573,7 @@ export function generateFallbackExplanation(
 
       case "GENERAL_FOLLOW_UP":
       default: {
-        if (previousProduct || (tradeoffs && tradeoffs.length > 0)) {
-          let tradeText = tradeoffs && tradeoffs.length > 0 ? ` Note trade-offs: ${tradeoffs.join(" ")}` : "";
-          const prevText = previousProduct ? ` This replaces ${previousProduct.name} (₹${previousProduct.price}).` : "";
-          summary = `${recommendation.name} (₹${recommendation.price}) is selected.${prevText}${tradeText}`;
-        } else {
-          summary = `I've updated your selection with the ${recommendation.name} (₹${recommendation.price}). The basket total is ₹${basket.total}, which complies with all merchant policies.`;
-        }
+        summary = `${recommendation.name} from ${recommendation.merchantName || "merchant"} (₹${recommendation.price}) is active in your proposed basket (total: ₹${basket.total}).`;
         break;
       }
     }

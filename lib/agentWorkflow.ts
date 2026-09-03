@@ -72,6 +72,11 @@ export async function runAgentWorkflow(
 
   // Check fast conversational router first
   const fastRoute = routeConversationalMessage(message, session);
+  let resolvedTargetName: string | undefined = fastRoute.targetProductId 
+    ? getAllProducts().find(p => p.id === fastRoute.targetProductId)?.name 
+    : (fastRoute.targetCandidateIndex !== undefined ? `Candidate #${fastRoute.targetCandidateIndex + 1}` : undefined);
+  const basketBefore = session?.currentBasket ? [...session.currentBasket] : [];
+  const activeProductBefore = session?.recommendedProduct || null;
 
   if (session) {
     // 1. Classify user message in context of active session
@@ -296,6 +301,8 @@ export async function runAgentWorkflow(
       policyValidation = validateTransaction(basketItems, intentToUse.budget ?? 999999, requestedDiscount);
       transactionState = session.transactionState;
 
+      directMsg = `Here are the top ${comparisonCandidates.length} options compared by price, features, merchant, and requirement match.`;
+
       createAuditEvent({
         eventType: "MERCHANT_COMPARED",
         actor: "AXIS_ONE",
@@ -347,6 +354,7 @@ export async function runAgentWorkflow(
         originalTotal = targetProduct.price + (upsell ? upsell.recommendedProduct.price : 0);
         policyValidation = validateTransaction(basketItems, budgetLimit, requestedDiscount);
         transactionState = policyValidation.approved ? "AWAITING_USER_APPROVAL" : "BLOCKED";
+        directMsg = `Got it — I've selected ${targetProduct.name}.`;
       } else {
         return executeNewSearch(message, activeSessionId!, requestedDiscount);
       }
@@ -378,6 +386,7 @@ export async function runAgentWorkflow(
       originalTotal = basketItems.reduce((sum, p) => sum + p.price, 0);
       policyValidation = validateTransaction(basketItems, session.originalIntent.budget ?? 999999, requestedDiscount);
       transactionState = session.transactionState;
+      directMsg = `Understood — keeping your active selection of the ${session.recommendedProduct.name} (₹${session.recommendedProduct.price}). Take your time, and let me know when you're ready.`;
     }
 
     else if (classificationAction === "ADD_UPSELL") {
@@ -428,46 +437,98 @@ export async function runAgentWorkflow(
     }
 
     else if (classificationAction === "REMOVE_UPSELL") {
-      if (!session.recommendedProduct) {
-        return handleEarlyFailure("POLICY_VALIDATION", "No recommended product in session context to remove upsell from.", activeSessionId!, classificationAction);
+      if (!session.recommendedProduct && (!session.currentBasket || session.currentBasket.length === 0)) {
+        return handleEarlyFailure("POLICY_VALIDATION", "No active products in session context to remove from.", activeSessionId!, classificationAction);
       }
       
+      const targetId = fastRoute.targetProductId;
+      let removedName = session.currentUpsell?.name || "accessory";
+      let updatedBasket: Product[] = [];
+
+      if (targetId) {
+        const found = session.currentBasket.find(p => p.id === targetId);
+        if (found) removedName = found.name;
+        updatedBasket = session.currentBasket.filter(p => p.id !== targetId);
+      } else if (session.currentUpsell) {
+        removedName = session.currentUpsell.name;
+        updatedBasket = session.currentBasket.filter(p => p.id !== session.currentUpsell?.id);
+      } else if (session.currentBasket.length > 1) {
+        const mainId = session.recommendedProduct?.id;
+        const accessory = session.currentBasket.find(p => p.id !== mainId);
+        if (accessory) removedName = accessory.name;
+        updatedBasket = session.currentBasket.filter(p => p.id === mainId);
+      } else {
+        updatedBasket = session.recommendedProduct ? [session.recommendedProduct] : session.currentBasket;
+      }
+
+      if (updatedBasket.length === 0 && session.recommendedProduct) {
+        updatedBasket = [session.recommendedProduct];
+      }
+
+      resolvedTargetName = removedName;
       upsell = null;
+      session.currentUpsell = null;
+      session.currentBasket = updatedBasket;
+
       recommendation = {
-        product: session.recommendedProduct,
+        product: session.recommendedProduct || updatedBasket[0],
         matchScore: 100,
-        matchedCriteria: ["Retained from session"],
+        matchedCriteria: ["Retained main selection from session"],
         unmatchedCriteria: [],
-        reasoning: "Retained main product from session after rejecting the upsell."
+        reasoning: `Removed ${removedName} from basket.`
       };
       
-      basketItems = [session.recommendedProduct];
-      originalTotal = session.recommendedProduct.price;
-      policyValidation = validateTransaction(basketItems, session.originalIntent.budget ?? 999999, requestedDiscount);
+      basketItems = updatedBasket;
+      originalTotal = updatedBasket.reduce((sum, p) => sum + p.price, 0);
+      policyValidation = validateTransaction(basketItems, (session.latestIntent || session.originalIntent).budget ?? 999999, requestedDiscount);
       transactionState = policyValidation.approved ? "AWAITING_USER_APPROVAL" : "BLOCKED";
+      directMsg = `Done — I removed the ${removedName}. Your updated basket total is ₹${policyValidation.finalAmount}.`;
 
       createAuditEvent({
         eventType: "POLICY_VALIDATED",
         actor: "POLICY_ENGINE",
         status: policyValidation.approved ? "SUCCESS" : "FAILED",
-        summary: `Basket updated. Upsell removed. Policy check: ${policyValidation.approved ? "PASSED" : "FAILED"}`,
+        summary: `Basket updated. Removed ${removedName}. Policy check: ${policyValidation.approved ? "PASSED" : "FAILED"}`,
         details: { basketItems: basketItems.map(p => p.name), finalAmount: policyValidation.finalAmount }
       });
     } 
 
     else if (classificationAction === "REMOVE_PRODUCT") {
+      const targetId = fastRoute.targetProductId;
+      let removedName = session.recommendedProduct?.name || "product";
+      let updatedBasket: Product[] = [];
+
+      if (targetId) {
+        const found = session.currentBasket.find(p => p.id === targetId);
+        if (found) removedName = found.name;
+        updatedBasket = session.currentBasket.filter(p => p.id !== targetId);
+      } else {
+        updatedBasket = [];
+      }
+
+      resolvedTargetName = removedName;
+      upsell = null;
+      session.currentUpsell = null;
+      session.currentBasket = updatedBasket;
+      if (updatedBasket.length === 0) {
+        session.recommendedProduct = undefined;
+      }
+
       recommendation = {
-        product: session.recommendedProduct || getAllProducts()[0],
-        matchScore: 0,
+        product: updatedBasket[0] || getAllProducts()[0],
+        matchScore: updatedBasket.length > 0 ? 100 : 0,
         matchedCriteria: [],
         unmatchedCriteria: [],
-        reasoning: "Product removed."
+        reasoning: `Removed ${removedName}.`
       };
-      upsell = null;
-      basketItems = [];
-      originalTotal = 0;
-      policyValidation = validateTransaction(basketItems, session.originalIntent.budget ?? 999999, requestedDiscount);
-      transactionState = "EXPLORING";
+
+      basketItems = updatedBasket;
+      originalTotal = updatedBasket.reduce((sum, p) => sum + p.price, 0);
+      policyValidation = validateTransaction(basketItems, (session.latestIntent || session.originalIntent).budget ?? 999999, requestedDiscount);
+      transactionState = updatedBasket.length > 0 ? (policyValidation.approved ? "AWAITING_USER_APPROVAL" : "BLOCKED") : "EXPLORING";
+      directMsg = updatedBasket.length > 0 
+        ? `Done — I removed the ${removedName}. Your ${updatedBasket[0].name} remains selected.` 
+        : `Done — I removed the ${removedName}. Your basket is now empty.`;
     }
     
     else if (classificationAction === "CHANGE_BUDGET") {
@@ -520,6 +581,7 @@ export async function runAgentWorkflow(
         originalTotal = basketItems.reduce((sum, p) => sum + p.price, 0);
         policyValidation = validateTransaction(basketItems, intentToUse.budget ?? 999999, requestedDiscount);
         transactionState = session.transactionState;
+        directMsg = `${session.recommendedProduct.name} is already the lowest priced option in our catalog at ₹${currentPrice}.`;
 
         createAuditEvent({
           eventType: "EXPLANATION_GENERATED",
@@ -542,6 +604,7 @@ export async function runAgentWorkflow(
         originalTotal = recommendation.product.price + (upsell ? upsell.recommendedProduct.price : 0);
         policyValidation = validateTransaction(basketItems, budgetLimit, requestedDiscount);
         transactionState = policyValidation.approved ? "AWAITING_USER_APPROVAL" : "BLOCKED";
+        directMsg = `I found a cheaper option: ${recommendation.product.name} at ₹${recommendation.product.price}.`;
 
         createAuditEvent({
           eventType: "POLICY_VALIDATED",
@@ -584,6 +647,7 @@ export async function runAgentWorkflow(
       originalTotal = recommendation.product.price + (upsell ? upsell.recommendedProduct.price : 0);
       policyValidation = validateTransaction(basketItems, budgetLimit, requestedDiscount);
       transactionState = policyValidation.approved ? "AWAITING_USER_APPROVAL" : "BLOCKED";
+      directMsg = `Got it — I've switched to ${recommendation.product.name} from ${recommendation.product.merchantName || 'merchant'} (₹${recommendation.product.price}).`;
     }
     
     else if (classificationAction === "CHANGE_REQUIREMENT" || classificationAction === "MODIFY_REQUIREMENTS") {
@@ -628,6 +692,8 @@ export async function runAgentWorkflow(
       originalTotal = basketItems.reduce((sum, p) => sum + p.price, 0);
       policyValidation = validateTransaction(basketItems, (session.latestIntent || session.originalIntent).budget ?? 999999, requestedDiscount);
       transactionState = session.transactionState;
+      const matchReq = recommendation.matchedCriteria.length > 0 ? recommendation.matchedCriteria.join(", ") : "requirements";
+      directMsg = `${recommendation.product.name} is the best match because it fits your budget and matches your ${matchReq}.`;
     } 
     
     else if (classificationAction === "CONFIRM_SELECTION") {
@@ -658,6 +724,7 @@ export async function runAgentWorkflow(
       originalTotal = basketItems.reduce((sum, p) => sum + p.price, 0);
       policyValidation = validateTransaction(basketItems, session.originalIntent.budget ?? 999999, requestedDiscount);
       transactionState = "USER_CONFIRMED";
+      directMsg = "Understood. Your selection is approved. You can now proceed to secure payment.";
 
       // Record audit event USER_APPROVED
       createAuditEvent({
@@ -891,6 +958,15 @@ export async function runAgentWorkflow(
     session.trustControls = trustControls;
     session.decisionHistory = updatedDecisionHistory;
     saveSession(session);
+
+    console.log(`[AXIS DEBUG] userQuery=${message}`);
+    console.log(`[AXIS DEBUG] sessionId=${activeSessionId}`);
+    console.log(`[AXIS DEBUG] classifiedAction=${classificationAction}`);
+    console.log(`[AXIS DEBUG] resolvedTarget=${resolvedTargetName || "NONE"}`);
+    console.log(`[AXIS DEBUG] basketBefore=${JSON.stringify(basketBefore.map(p => p.name))}`);
+    console.log(`[AXIS DEBUG] basketAfter=${JSON.stringify(basketItems.map(p => p.name))}`);
+    console.log(`[AXIS DEBUG] activeProductBefore=${activeProductBefore?.name || "NONE"}`);
+    console.log(`[AXIS DEBUG] activeProductAfter=${recommendation.product?.name || "NONE"}`);
 
     return {
       success: true,
@@ -1380,6 +1456,15 @@ async function executeWorkflowWithIntent(
   sessionToSave.recentMessages.push({ role: "AXIS_ONE", content: explanation.summary });
   sessionToSave.conversationHistory = sessionToSave.recentMessages;
   saveSession(sessionToSave);
+
+  console.log(`[AXIS DEBUG] userQuery=${userMessage || "NEW_INTENT"}`);
+  console.log(`[AXIS DEBUG] sessionId=${sessionId}`);
+  console.log(`[AXIS DEBUG] classifiedAction=${conversationAction}`);
+  console.log(`[AXIS DEBUG] resolvedTarget=${recommendation.product?.name || "NONE"}`);
+  console.log(`[AXIS DEBUG] basketBefore=${JSON.stringify(existingSession?.currentBasket?.map(p => p.name) || [])}`);
+  console.log(`[AXIS DEBUG] basketAfter=${JSON.stringify(basketItems.map(p => p.name))}`);
+  console.log(`[AXIS DEBUG] activeProductBefore=${existingSession?.recommendedProduct?.name || "NONE"}`);
+  console.log(`[AXIS DEBUG] activeProductAfter=${recommendation.product?.name || "NONE"}`);
 
   if (isApproved) {
     return {
