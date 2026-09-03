@@ -30,7 +30,7 @@ import {
 } from "./gemini";
 import { routeConversationalMessage } from "./conversationRouter";
 import { buildMerchantComparison } from "./merchantComparison";
-import { resolveComparisonCandidates, buildProductComparison } from "./productComparison";
+import { resolveComparisonCandidates, buildProductComparison, answerComparisonQuestion } from "./productComparison";
 import { 
   buildAgentActivities, 
   buildDecisionSummary, 
@@ -309,6 +309,58 @@ export async function runAgentWorkflow(
         status: "SUCCESS",
         summary: `Intelligent product comparison executed across ${comparisonCandidates.length} products.`,
         details: { candidates: comparisonCandidates.map(c => c.product.name), resolutionNote: resolved.resolutionNote }
+      });
+    }
+
+    else if (classificationAction === "COMPARISON_QUESTION") {
+      const intentToUse = session.latestIntent || session.originalIntent;
+      
+      // Get existing comparison data or build it from candidates
+      let compData = session.productComparison;
+      if (!compData && session.candidatePool && session.candidatePool.length >= 2) {
+        compData = buildProductComparison(session.candidatePool.slice(0, 3), intentToUse);
+      } else if (!compData) {
+        const resolved = resolveComparisonCandidates(message, session);
+        if (resolved && resolved.candidates.length >= 2) {
+          compData = buildProductComparison(resolved.candidates, intentToUse);
+        }
+      }
+
+      productComparison = compData || session.productComparison;
+      
+      // Retain active recommendation & basket
+      recommendation = {
+        product: session.recommendedProduct || (compData?.bestOverall || getAllProducts()[0]),
+        matchScore: 100,
+        matchedCriteria: session.recommendedProduct?.tags || [],
+        unmatchedCriteria: [],
+        reasoning: "Retained from active session context."
+      };
+
+      upsell = session.currentUpsell ? {
+        recommendedProduct: session.currentUpsell,
+        originalTotal: recommendation.product.price,
+        upsellAmount: session.currentUpsell.price,
+        newTotal: recommendation.product.price + session.currentUpsell.price,
+        remainingBudget: Math.max(0, (intentToUse.budget ?? 0) - (recommendation.product.price + session.currentUpsell.price)),
+        relevanceScore: 100,
+        reasoning: "Retained from session.",
+        approved: true
+      } : null;
+
+      basketItems = session.currentBasket;
+      originalTotal = basketItems.reduce((sum, p) => sum + p.price, 0);
+      policyValidation = validateTransaction(basketItems, intentToUse.budget ?? 999999, requestedDiscount);
+      transactionState = session.transactionState;
+
+      directMsg = answerComparisonQuestion(message, compData, session);
+
+      createAuditEvent({
+        eventType: "EXPLANATION_GENERATED",
+        actor: "AXIS_ONE",
+        status: "SUCCESS",
+        summary: `Answered contextual comparison question: "${message}"`,
+        details: { question: message, directAnswer: directMsg }
       });
     }
 
@@ -692,8 +744,10 @@ export async function runAgentWorkflow(
       originalTotal = basketItems.reduce((sum, p) => sum + p.price, 0);
       policyValidation = validateTransaction(basketItems, (session.latestIntent || session.originalIntent).budget ?? 999999, requestedDiscount);
       transactionState = session.transactionState;
-      const matchReq = recommendation.matchedCriteria.length > 0 ? recommendation.matchedCriteria.join(", ") : "requirements";
-      directMsg = `${recommendation.product.name} is the best match because it fits your budget and matches your ${matchReq}.`;
+      const budgetVal = (session.latestIntent || session.originalIntent).budget;
+      const budgetClause = budgetVal ? `₹${budgetVal} budget` : "budget";
+      const matchReq = recommendation.matchedCriteria.length > 0 ? recommendation.matchedCriteria.join(", ") : "your requirements";
+      directMsg = `${recommendation.product.name} is currently selected because it has the strongest match to your requirements (${matchReq}) and remains within your ${budgetClause}.`;
     } 
     
     else if (classificationAction === "CONFIRM_SELECTION") {

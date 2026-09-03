@@ -205,7 +205,7 @@ export function deriveResponseIntent(
   }
 
   // 3. Comparisons
-  if (action === "PRODUCT_COMPARISON" || /\b(compare|which merchant|different stores|better warranty|better deal)\b/i.test(query)) {
+  if (action === "PRODUCT_COMPARISON") {
     return "PRODUCT_COMPARISON";
   }
 
@@ -248,10 +248,10 @@ export function deriveResponseIntent(
     return "PRODUCT_COMPARISON";
   }
   if (action === "REQUEST_EXPLANATION") {
-    if (previousProduct || /\b(compare|vs|instead of|difference|versus)\b/i.test(query)) {
-      return "PRODUCT_COMPARISON";
-    }
     return "REQUEST_EXPLANATION";
+  }
+  if (action === "COMPARISON_QUESTION") {
+    return "GENERAL_FOLLOW_UP";
   }
   if (action === "NEW_SEARCH" || !action) {
     return "INITIAL_RECOMMENDATION";

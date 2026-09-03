@@ -468,6 +468,149 @@ export function buildProductComparison(
 }
 
 /**
+ * Answers contextual questions about compared products deterministically using catalog facts.
+ */
+export function answerComparisonQuestion(
+  message: string,
+  comparisonData: ProductComparisonData | undefined,
+  context: CommerceConversationContext
+): string {
+  const clean = message.toLowerCase().trim().replace(/[.,!?;:]+/g, " ").replace(/\s+/g, " ").trim();
+  const intent = context.latestIntent || context.originalIntent || { productCategory: "Mechanical Keyboard" };
+  const budget = intent.budget ?? 5000;
+  
+  // Candidates pool
+  const candidates: RankedResult[] = comparisonData?.comparedProducts && comparisonData.comparedProducts.length > 0
+    ? comparisonData.comparedProducts
+    : (context.candidatePool && context.candidatePool.length > 0 ? context.candidatePool : []);
+
+  if (candidates.length === 0) {
+    const active = context.recommendedProduct;
+    if (active) {
+      return `${active.name} from ${active.merchantName || 'merchant'} (₹${active.price}) is your current active recommendation.`;
+    }
+    return "I can compare products once we find options that match your search requirements.";
+  }
+
+  // 1. CHEAPER QUESTION
+  if (
+    clean.includes("cheaper") || 
+    clean.includes("cheapest") || 
+    clean.includes("lowest price") || 
+    clean.includes("lower price")
+  ) {
+    const cheapestProduct = comparisonData?.cheapest || 
+      [...candidates].sort((a, b) => a.product.price - b.product.price)[0].product;
+    const mName = cheapestProduct.merchantName ? ` from ${cheapestProduct.merchantName}` : "";
+    return `The ${cheapestProduct.name}${mName} is the cheapest of the compared options at ₹${cheapestProduct.price}.`;
+  }
+
+  // 2. PROGRAMMING / CODING QUESTION
+  if (
+    clean.includes("programming") || 
+    clean.includes("coding") || 
+    clean.includes("developer") || 
+    clean.includes("code")
+  ) {
+    // Find candidate that best matches programming
+    const progMatch = candidates.find(c => 
+      c.product.useCases?.some(u => u.toLowerCase().includes("programming")) ||
+      c.product.tags.some(t => t.toLowerCase().includes("programming") || t.toLowerCase().includes("coding"))
+    ) || candidates[0];
+
+    const prod = progMatch.product;
+    const mName = prod.merchantName ? ` from ${prod.merchantName}` : "";
+    return `Based on your programming requirement, the ${prod.name}${mName} (₹${prod.price}) is the stronger match because it fits your ₹${budget} budget and has the highest requirement match (${progMatch.matchScore}%) among the compared options.`;
+  }
+
+  // 3. GAMING QUESTION
+  if (
+    clean.includes("gaming") || 
+    clean.includes("gamer") || 
+    clean.includes("games") || 
+    clean.includes("esports")
+  ) {
+    const gameMatch = candidates.find(c => 
+      c.product.useCases?.some(u => u.toLowerCase().includes("gaming")) ||
+      c.product.tags.some(t => t.toLowerCase().includes("gaming")) ||
+      c.product.category.toLowerCase().includes("gaming")
+    ) || candidates[0];
+
+    const prod = gameMatch.product;
+    const mName = prod.merchantName ? ` from ${prod.merchantName}` : "";
+    return `For gaming, the ${prod.name}${mName} (₹${prod.price}) is the better match with dedicated gaming features and ${gameMatch.matchScore}% requirement match.`;
+  }
+
+  // 4. OFFICE / TYPING QUESTION
+  if (
+    clean.includes("office") || 
+    clean.includes("work") || 
+    clean.includes("typing") || 
+    clean.includes("productivity")
+  ) {
+    const officeMatch = candidates.find(c => 
+      c.product.useCases?.some(u => u.toLowerCase().includes("office")) ||
+      c.product.tags.some(t => t.toLowerCase().includes("office"))
+    ) || candidates[0];
+
+    const prod = officeMatch.product;
+    const mName = prod.merchantName ? ` from ${prod.merchantName}` : "";
+    return `For office work, the ${prod.name}${mName} (₹${prod.price}) is the better match.`;
+  }
+
+  // 5. BATTERY QUESTION
+  if (
+    clean.includes("battery") || 
+    clean.includes("hours") || 
+    clean.includes("charge")
+  ) {
+    const batteryCandidates = candidates.filter(c => c.product.batteryLife && parseBatteryHours(c.product.batteryLife) > 0);
+    if (batteryCandidates.length > 0) {
+      const topBat = [...batteryCandidates].sort((a, b) => parseBatteryHours(b.product.batteryLife) - parseBatteryHours(a.product.batteryLife))[0].product;
+      return `The ${topBat.name} has the best battery life among the compared options with ${topBat.batteryLife} on a single charge.`;
+    }
+    return "Battery life is not explicitly specified for all compared models, but wired models operate continuously without charging.";
+  }
+
+  // 6. WARRANTY QUESTION
+  if (
+    clean.includes("warranty") || 
+    clean.includes("guarantee") || 
+    clean.includes("protection")
+  ) {
+    const bestWar = comparisonData?.bestWarranty || 
+      [...candidates].sort((a, b) => parseWarrantyMonths(b.product.warranty) - parseWarrantyMonths(a.product.warranty))[0].product;
+    const mName = bestWar.merchantName ? ` from ${bestWar.merchantName}` : "";
+    return `The ${bestWar.name}${mName} offers the strongest warranty coverage with ${bestWar.warranty || '1 Year Merchant Warranty'}.`;
+  }
+
+  // 7. DIFFERENCE QUESTION
+  if (
+    clean.includes("difference") || 
+    clean.includes("differences") || 
+    clean.includes("how do they differ") || 
+    clean.includes("compare difference")
+  ) {
+    if (comparisonData?.differences && comparisonData.differences.length > 0) {
+      return `The main differences are: ${comparisonData.differences.map(d => d.headline).join(". ")}.`;
+    }
+    if (candidates.length >= 2) {
+      const p1 = candidates[0].product;
+      const p2 = candidates[1].product;
+      return `The main differences are price, warranty, and features: ${p1.name} is ₹${p1.price} from ${p1.merchantName || 'merchant'} with ${p1.warranty || 'standard warranty'}, while ${p2.name} is ₹${p2.price} from ${p2.merchantName || 'merchant'} with ${p2.warranty || 'standard warranty'}.`;
+    }
+    return "The compared options differ primarily in price, merchant warranties, and connectivity.";
+  }
+
+  // 8. BETTER OVERALL / BEST / WHICH SHOULD I CHOOSE
+  const topCandidate = comparisonData?.bestOverall || comparisonData?.bestMatch || candidates[0].product;
+  const topRanked = candidates.find(c => c.product.id === topCandidate.id) || candidates[0];
+  const mName = topCandidate.merchantName ? ` from ${topCandidate.merchantName}` : "";
+
+  return `Based on the current requirements, ${topCandidate.name}${mName} (₹${topCandidate.price}) is the better overall match because it fits your ₹${budget} budget with the highest compatibility score (${topRanked.matchScore}%).`;
+}
+
+/**
  * Helper to parse warranty string into numeric months.
  */
 function parseWarrantyMonths(warrantyStr?: string): number {

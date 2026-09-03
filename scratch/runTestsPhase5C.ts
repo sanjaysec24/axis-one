@@ -42,22 +42,22 @@ async function runAllPhase5CTests() {
   assert(r3.action === "PRODUCT_COMPARISON", "Router detects 'compare the first and second' as PRODUCT_COMPARISON");
 
   const r4 = routeConversationalMessage("what's the difference?");
-  assert(r4.action === "PRODUCT_COMPARISON", "Router detects 'what's the difference?' as PRODUCT_COMPARISON");
+  assert(r4.action === "COMPARISON_QUESTION", "Router detects 'what's the difference?' as COMPARISON_QUESTION");
 
   const r5 = routeConversationalMessage("which is better?");
-  assert(r5.action === "PRODUCT_COMPARISON", "Router detects 'which is better?' as PRODUCT_COMPARISON");
+  assert(r5.action === "COMPARISON_QUESTION", "Router detects 'which is better?' as COMPARISON_QUESTION");
 
   const r6 = routeConversationalMessage("which is cheaper?");
-  assert(r6.action === "PRODUCT_COMPARISON", "Router detects 'which is cheaper?' as PRODUCT_COMPARISON");
+  assert(r6.action === "COMPARISON_QUESTION", "Router detects 'which is cheaper?' as COMPARISON_QUESTION");
 
   const r7 = routeConversationalMessage("which has better battery?");
-  assert(r7.action === "PRODUCT_COMPARISON", "Router detects 'which has better battery?' as PRODUCT_COMPARISON");
+  assert(r7.action === "COMPARISON_QUESTION", "Router detects 'which has better battery?' as COMPARISON_QUESTION");
 
   const r8 = routeConversationalMessage("which is better for programming?");
-  assert(r8.action === "PRODUCT_COMPARISON", "Router detects 'which is better for programming?' as PRODUCT_COMPARISON");
+  assert(r8.action === "COMPARISON_QUESTION", "Router detects 'which is better for programming?' as COMPARISON_QUESTION");
 
   const r9 = routeConversationalMessage("show me the differences");
-  assert(r9.action === "PRODUCT_COMPARISON", "Router detects 'show me the differences' as PRODUCT_COMPARISON");
+  assert(r9.action === "COMPARISON_QUESTION", "Router detects 'show me the differences' as COMPARISON_QUESTION");
 
   const r10 = routeConversationalMessage("compare these two");
   assert(r10.action === "PRODUCT_COMPARISON", "Router detects 'compare these two' as PRODUCT_COMPARISON");

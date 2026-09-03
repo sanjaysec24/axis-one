@@ -271,8 +271,70 @@ export function routeConversationalMessage(
   }
 
   // =========================================================================
-  // 5. PRODUCT & MERCHANT COMPARISON
-  // ("compare", "compare the top 3", "compare these", "compare them", "what is the difference", "which is better")
+  // 5A. COMPARISON QUESTIONS (Specific factual inquiries over compared products)
+  // ("which is better for programming?", "which is cheaper?", "what's the difference?", "which is better?", "better battery?")
+  // =========================================================================
+  if (
+    clean.includes("better for programming") ||
+    clean.includes("best for programming") ||
+    clean.includes("suitable for programming") ||
+    clean.includes("for programming") ||
+    clean.includes("better for gaming") ||
+    clean.includes("best for gaming") ||
+    clean.includes("better for office") ||
+    clean.includes("best for office") ||
+    clean.includes("which is cheaper") ||
+    clean.includes("which one is cheaper") ||
+    clean.includes("which is the cheapest") ||
+    clean.includes("which is cheaper?") ||
+    clean.includes("which one is cheaper?") ||
+    clean.includes("better battery") ||
+    clean.includes("best battery") ||
+    clean.includes("better warranty") ||
+    clean.includes("best warranty") ||
+    clean.includes("what's the difference") ||
+    clean.includes("what is the difference") ||
+    clean.includes("whats the difference") ||
+    clean.includes("what are the differences") ||
+    clean.includes("show me the difference") ||
+    clean.includes("show me the differences") ||
+    clean.includes("tell me the difference") ||
+    clean.includes("difference") ||
+    clean.includes("differences") ||
+    clean.includes("how do they differ") ||
+    clean === "which is better" ||
+    clean === "which is better?" ||
+    clean === "which one is better" ||
+    clean === "which one is better?" ||
+    clean === "which is best" ||
+    clean === "which is best?" ||
+    clean === "which should i choose" ||
+    clean === "which should i choose?" ||
+    clean === "which one should i choose" ||
+    clean === "which one should i choose?" ||
+    clean === "which should i buy" ||
+    clean === "which should i buy?" ||
+    clean === "which one should i buy" ||
+    clean === "which one should i buy?" ||
+    clean === "which is more suitable" ||
+    clean === "which is more suitable?" ||
+    clean === "better?" ||
+    clean === "best one?" ||
+    clean === "best?" ||
+    clean.includes("which merchant") ||
+    clean.includes("different stores") ||
+    clean.includes("better deal")
+  ) {
+    return {
+      action: "COMPARISON_QUESTION",
+      confidence: 1.0,
+      reasoning: "User asked a specific factual question about compared products."
+    };
+  }
+
+  // =========================================================================
+  // 5B. ENTER PRODUCT & MERCHANT COMPARISON MODE
+  // ("compare", "compare the top 3", "compare these", "compare them", "compare all")
   // =========================================================================
   if (
     clean === "compare" ||
@@ -281,36 +343,41 @@ export function routeConversationalMessage(
     clean === "compare these" ||
     clean === "compare all" ||
     clean.startsWith("compare ") ||
-    clean.includes("difference") ||
-    clean.includes("differences") ||
-    clean.includes("which is better") ||
-    clean.includes("which one is better") ||
-    clean.includes("which should i buy") ||
-    clean.includes("which should i choose") ||
-    clean.includes("which one should i buy") ||
-    clean.includes("which one should i choose") ||
-    clean.includes("which is cheaper") ||
-    clean.includes("which one is cheaper") ||
-    clean.includes("better battery") ||
-    clean.includes("better warranty") ||
-    clean.includes("better for programming") ||
-    clean.includes("better for gaming") ||
-    clean.includes("better for office") ||
-    clean.includes("which merchant") ||
-    clean.includes("different stores") ||
-    clean.includes("better deal")
+    clean.includes("show comparison") ||
+    clean.includes("compare candidates") ||
+    clean.includes("compare options")
   ) {
     return {
       action: "PRODUCT_COMPARISON",
       confidence: 1.0,
-      reasoning: "User requested intelligent product comparison."
+      reasoning: "User requested intelligent product comparison mode."
     };
   }
 
   // =========================================================================
   // 6. REFERENCES, ORDINALS & SELECTIONS FROM COMPARISON
-  // ("first one", "the first one", "choose the first one", "second one", "the second one", "choose the second one")
+  // ("first one", "second one", "give that", "take that", "that one", "this one")
   // =========================================================================
+  if (
+    clean === "give that" ||
+    clean === "give me that" ||
+    clean === "take that" ||
+    clean === "i'll take that" ||
+    clean === "ill take that" ||
+    clean === "select that" ||
+    clean === "choose that" ||
+    clean === "that one" ||
+    clean === "this one" ||
+    clean === "that"
+  ) {
+    return {
+      action: "CONFIRM_REFERENCED_PRODUCT",
+      targetCandidateIndex: 0,
+      confidence: 1.0,
+      reasoning: "User selected active/top referenced product via pronoun ('give that')."
+    };
+  }
+
   if (
     clean === "first" ||
     clean === "the first" ||
